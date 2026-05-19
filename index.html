@@ -185,6 +185,24 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 .mode-badge{display:inline-block;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700;margin-bottom:14px}
 .mode-badge.league{background:rgba(0,170,255,.15);color:var(--blue)}
 .mode-badge.solo{background:rgba(0,230,100,.1);color:var(--green)}
+
+/* ── AUTH ── */
+.auth-tabs{display:flex;width:100%;background:#0d1a10;border-radius:14px;padding:4px;margin-bottom:24px;gap:4px}
+.auth-tab{flex:1;padding:10px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;background:transparent;color:var(--muted);transition:all .2s}
+.auth-tab.active{background:var(--green3);color:#fff}
+.auth-field{width:100%;padding:14px 16px;border-radius:12px;border:2px solid rgba(0,230,100,.15);background:#0d1a10;color:var(--text);font-size:16px;font-family:inherit;text-align:right;margin-bottom:12px;direction:rtl}
+.auth-field:focus{outline:none;border-color:var(--green)}
+.auth-avatar-row{display:flex;gap:10px;justify-content:center;margin-bottom:20px;flex-wrap:wrap}
+.auth-avatar{font-size:28px;width:52px;height:52px;border-radius:14px;background:#0d1a10;border:2px solid rgba(0,230,100,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.auth-avatar.sel{border-color:var(--green);background:rgba(0,230,100,.1);transform:scale(1.1)}
+.auth-error{color:#ff6666;font-size:13px;text-align:center;margin-bottom:10px;min-height:18px}
+.home-user-bar{display:flex;align-items:center;gap:10px;background:#0d1a10;border-radius:14px;padding:12px 16px;width:100%;margin-bottom:20px;border:1px solid rgba(0,230,100,.1)}
+.home-user-avatar{font-size:26px}
+.home-user-info{flex:1}
+.home-user-name{font-size:16px;font-weight:700;color:var(--green)}
+.home-user-sub{font-size:12px;color:var(--muted)}
+.home-logout-btn{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px 8px;border-radius:8px;font-family:inherit}
+.home-logout-btn:hover{color:var(--red)}
   </style>
 </head>
 <body>
@@ -208,8 +226,58 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
   </div>
 </div>
 
+<!-- ══════════ AUTH ══════════ -->
+<div class="screen active" id="screen-auth">
+  <div class="game-logo" style="margin-top:40px">🏆</div>
+  <div class="game-title">لعّييب</div>
+  <div class="game-subtitle">فكّر. سابق. انتصر</div>
+
+  <div style="width:100%;margin-top:20px">
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">تسجيل الدخول</button>
+      <button class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">حساب جديد</button>
+    </div>
+
+    <!-- Login -->
+    <div id="auth-login-form">
+      <input class="auth-field" id="login-user" type="text" placeholder="اسم المستخدم" maxlength="20" />
+      <input class="auth-field" id="login-pass" type="password" placeholder="كلمة المرور" maxlength="30" />
+      <div class="auth-error" id="login-error"></div>
+      <button class="btn btn-primary" style="justify-content:center" onclick="doLogin()">دخول ▶</button>
+    </div>
+
+    <!-- Register -->
+    <div id="auth-register-form" style="display:none">
+      <div class="section-label" style="margin-bottom:8px">اختر أفاتار</div>
+      <div class="auth-avatar-row" id="avatar-row">
+        <div class="auth-avatar sel" data-av="⚽" onclick="selectAvatar(this)">⚽</div>
+        <div class="auth-avatar" data-av="🏆" onclick="selectAvatar(this)">🏆</div>
+        <div class="auth-avatar" data-av="🦁" onclick="selectAvatar(this)">🦁</div>
+        <div class="auth-avatar" data-av="🐅" onclick="selectAvatar(this)">🐅</div>
+        <div class="auth-avatar" data-av="🦅" onclick="selectAvatar(this)">🦅</div>
+        <div class="auth-avatar" data-av="🔥" onclick="selectAvatar(this)">🔥</div>
+        <div class="auth-avatar" data-av="⭐" onclick="selectAvatar(this)">⭐</div>
+        <div class="auth-avatar" data-av="👑" onclick="selectAvatar(this)">👑</div>
+      </div>
+      <input class="auth-field" id="reg-user" type="text" placeholder="اسم المستخدم (بدون مسافات)" maxlength="20" />
+      <input class="auth-field" id="reg-pass" type="password" placeholder="كلمة المرور" maxlength="30" />
+      <input class="auth-field" id="reg-pass2" type="password" placeholder="تأكيد كلمة المرور" maxlength="30" />
+      <div class="auth-error" id="reg-error"></div>
+      <button class="btn btn-primary" style="justify-content:center" onclick="doRegister()">إنشاء حساب ✔</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ HOME ══════════ -->
-<div class="screen active" id="screen-home">
+<div class="screen" id="screen-home">
+  <div class="home-user-bar" id="home-user-bar">
+    <div class="home-user-avatar" id="home-avatar">⚽</div>
+    <div class="home-user-info">
+      <div class="home-user-name" id="home-username">لاعب</div>
+      <div class="home-user-sub">مرحباً بك في لعّييب!</div>
+    </div>
+    <button class="home-logout-btn" onclick="doLogout()">خروج</button>
+  </div>
   <div class="game-logo">🏆</div>
   <div class="game-title">لعّييب</div>
   <div class="game-subtitle">فكّر. سابق. انتصر</div>
@@ -1070,8 +1138,105 @@ document.querySelectorAll('#lb-filter .cat-btn').forEach(b => {
   };
 });
 
+// ═══════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════
+let selectedAvatar = '⚽';
+
+function getUsers() {
+  return JSON.parse(localStorage.getItem('layyib_users') || '{}');
+}
+function saveUsers(users) {
+  localStorage.setItem('layyib_users', JSON.stringify(users));
+}
+function getCurrentUser() {
+  return JSON.parse(localStorage.getItem('layyib_current_user') || 'null');
+}
+function setCurrentUser(user) {
+  localStorage.setItem('layyib_current_user', JSON.stringify(user));
+}
+
+function switchAuthTab(tab) {
+  const isLogin = tab === 'login';
+  $('tab-login').classList.toggle('active', isLogin);
+  $('tab-register').classList.toggle('active', !isLogin);
+  $('auth-login-form').style.display = isLogin ? 'block' : 'none';
+  $('auth-register-form').style.display = isLogin ? 'none' : 'block';
+  $('login-error').textContent = '';
+  $('reg-error').textContent = '';
+}
+
+function selectAvatar(el) {
+  document.querySelectorAll('.auth-avatar').forEach(a => a.classList.remove('sel'));
+  el.classList.add('sel');
+  selectedAvatar = el.dataset.av;
+}
+
+function doLogin() {
+  const username = $('login-user').value.trim();
+  const password = $('login-pass').value;
+  const errEl = $('login-error');
+  errEl.textContent = '';
+
+  if (!username || !password) { errEl.textContent = '⚠️ أدخل اسم المستخدم وكلمة المرور'; return; }
+
+  const users = getUsers();
+  const user = users[username.toLowerCase()];
+  if (!user) { errEl.textContent = '❌ اسم المستخدم غير موجود'; return; }
+  if (user.password !== password) { errEl.textContent = '❌ كلمة المرور غير صحيحة'; return; }
+
+  setCurrentUser({ username: user.displayName, avatar: user.avatar });
+  enterHome();
+}
+
+function doRegister() {
+  const username = $('reg-user').value.trim();
+  const pass1 = $('reg-pass').value;
+  const pass2 = $('reg-pass2').value;
+  const errEl = $('reg-error');
+  errEl.textContent = '';
+
+  if (!username) { errEl.textContent = '⚠️ أدخل اسم المستخدم'; return; }
+  if (username.length < 3) { errEl.textContent = '⚠️ الاسم قصير جداً (3 أحرف على الأقل)'; return; }
+  if (/\s/.test(username)) { errEl.textContent = '⚠️ لا تضع مسافات في الاسم'; return; }
+  if (!pass1) { errEl.textContent = '⚠️ أدخل كلمة المرور'; return; }
+  if (pass1.length < 4) { errEl.textContent = '⚠️ كلمة المرور قصيرة (4 أحرف على الأقل)'; return; }
+  if (pass1 !== pass2) { errEl.textContent = '❌ كلمتا المرور غير متطابقتين'; return; }
+
+  const users = getUsers();
+  if (users[username.toLowerCase()]) { errEl.textContent = '❌ اسم المستخدم مأخوذ، جرّب اسماً آخر'; return; }
+
+  users[username.toLowerCase()] = { displayName: username, password: pass1, avatar: selectedAvatar, createdAt: Date.now() };
+  saveUsers(users);
+  setCurrentUser({ username, avatar: selectedAvatar });
+  enterHome();
+}
+
+function doLogout() {
+  localStorage.removeItem('layyib_current_user');
+  showScreen('screen-auth');
+  $('login-user').value = '';
+  $('login-pass').value = '';
+  $('login-error').textContent = '';
+}
+
+function enterHome() {
+  const user = getCurrentUser();
+  if (user) {
+    $('home-username').textContent = user.username;
+    $('home-avatar').textContent = user.avatar;
+  }
+  showScreen('screen-home');
+}
+
 // Init
 tryAutoInitFirebase();
+
+// Check if already logged in
+const _savedUser = getCurrentUser();
+if (_savedUser) {
+  enterHome();
+}
 </script>
 </body>
 </html>
