@@ -6,8 +6,7 @@
   <meta name="theme-color" content="#060e0a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>لعّييب</title>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -212,16 +211,14 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 <!-- ══════════ FIREBASE MODAL ══════════ -->
 <div class="modal-overlay" id="firebase-modal" style="display:none" onclick="if(event.target===this){}">
   <div class="modal-card">
-    <div class="modal-title">🔧 إعداد اللعب الأونلاين</div>
-    <div class="modal-sub">وضع الدوري يحتاج قاعدة بيانات Firebase (مجانية). اتبع الخطوات التالية:</div>
+    <div class="modal-title">🌐 اتصال بالخادم</div>
+    <div class="modal-sub">وضع الدوري يحتاج اتصالاً بخادم اللعبة. إذا كنت تشغّل الخادم محلياً اترك الحقل فارغاً.</div>
     <div class="setup-steps">
-      <div class="setup-step"><div class="step-num">1</div><div>اذهب إلى <strong style="color:var(--blue)">console.firebase.google.com</strong> وأنشئ مشروعاً جديداً</div></div>
-      <div class="setup-step"><div class="step-num">2</div><div>من القائمة الجانبية اختر <strong>Build → Realtime Database</strong> ثم <strong>Create database</strong> واختر <em>Test mode</em></div></div>
-      <div class="setup-step"><div class="step-num">3</div><div>اذهب إلى <strong>Project Settings ⚙️</strong> وانزل لـ "Your apps" ثم أضف تطبيق ويب. انسخ الـ config JSON</div></div>
-      <div class="setup-step"><div class="step-num">4</div><div>الصق الـ config هنا:</div></div>
+      <div class="setup-step"><div class="step-num">1</div><div>شغّل الخادم: <strong style="color:var(--blue)">npm install &amp;&amp; npm start</strong></div></div>
+      <div class="setup-step"><div class="step-num">2</div><div>أو أدخل رابط خادم مستضاف (Render, Railway...)</div></div>
     </div>
-    <textarea class="config-textarea" id="firebase-config-input" placeholder='{"apiKey":"...","authDomain":"...","databaseURL":"...","projectId":"...","appId":"..."}'></textarea>
-    <button class="btn btn-blue" onclick="saveFirebaseConfig()">💾 حفظ وتشغيل</button>
+    <input class="config-textarea" id="server-url-input" placeholder="http://localhost:3000" style="min-height:50px;font-size:15px;text-align:center;" />
+    <button class="btn btn-blue" onclick="saveServerConfig()">🔌 اتصال</button>
     <button class="btn btn-outline" style="margin-top:0" onclick="closeFirebaseModal()">إلغاء</button>
   </div>
 </div>
@@ -479,57 +476,102 @@ const league = {
 };
 
 // ═══════════════════════════════════════════
-// FIREBASE
+// SOCKET.IO
 // ═══════════════════════════════════════════
-let db = null;
+let socket = null;
 
-function initFirebase(cfg) {
-  try {
-    if (firebase.apps.length) firebase.apps[0].delete();
-    firebase.initializeApp(cfg);
-    db = firebase.database();
-    return true;
-  } catch(e) {
-    console.error(e);
-    return false;
-  }
+function connectToServer(url, onSuccess, onFail) {
+  if (socket) { socket.disconnect(); socket = null; }
+  const serverUrl = (url || 'http://localhost:3000').trim();
+  socket = io(serverUrl, { timeout: 5000, reconnectionAttempts: 3 });
+
+  const timeout = setTimeout(() => {
+    if (!socket.connected) {
+      socket.disconnect();
+      showToast('❌ تعذّر الاتصال بالخادم');
+      if (onFail) onFail();
+    }
+  }, 5000);
+
+  socket.on('connect', () => {
+    clearTimeout(timeout);
+    localStorage.setItem('layyib_server', serverUrl);
+    setupSocketListeners();
+    showToast('✅ متصل بالخادم!');
+    if (onSuccess) onSuccess();
+  });
+
+  socket.on('disconnect', () => { showToast('⚠️ انقطع الاتصال بالخادم'); });
+  socket.on('connect_error', () => { clearTimeout(timeout); });
 }
 
-function tryAutoInitFirebase() {
-  const raw = localStorage.getItem('layyib_fb');
-  if (!raw) return false;
-  try {
-    return initFirebase(JSON.parse(raw));
-  } catch { return false; }
+function tryAutoConnect() {
+  const url = localStorage.getItem('layyib_server');
+  if (!url) return false;
+  connectToServer(url, null, null);
+  return true;
 }
 
-function saveFirebaseConfig() {
-  const raw = document.getElementById('firebase-config-input').value.trim();
-  let cfg;
-  try { cfg = JSON.parse(raw); } catch {
-    showToast("⚠️ تأكد من صحة الـ JSON"); return;
-  }
-  if (!cfg.databaseURL) { showToast("⚠️ databaseURL مفقود"); return; }
-  if (initFirebase(cfg)) {
-    localStorage.setItem('layyib_fb', raw);
+function saveServerConfig() {
+  const url = document.getElementById('server-url-input').value.trim() || 'http://localhost:3000';
+  connectToServer(url, () => {
     closeFirebaseModal();
-    showToast("✅ تم الاتصال!");
     showScreen('screen-league-menu');
-  } else {
-    showToast("❌ فشل الاتصال، تحقق من الإعدادات");
-  }
+  }, null);
 }
 
 function closeFirebaseModal() {
   document.getElementById('firebase-modal').style.display = 'none';
 }
 
-function requireFirebase(onReady) {
-  if (db) { onReady(); return; }
-  if (tryAutoInitFirebase()) { onReady(); return; }
+function requireServer(onReady) {
+  if (socket && socket.connected) { onReady(); return; }
+  const url = localStorage.getItem('layyib_server');
+  if (url) {
+    connectToServer(url, onReady, () => {
+      document.getElementById('firebase-modal').style.display = 'flex';
+    });
+    return;
+  }
   document.getElementById('firebase-modal').style.display = 'flex';
 }
 
+function setupSocketListeners() {
+  socket.off('room_created'); socket.off('room_joined'); socket.off('room_updated');
+  socket.off('game_started'); socket.off('question_changed'); socket.off('players_updated');
+  socket.off('game_finished'); socket.off('room_closed'); socket.off('join_error');
+
+  socket.on('room_created', ({ code }) => {
+    league.roomCode = code; league.isHost = true; enterWaitingRoom(code);
+  });
+  socket.on('room_joined', ({ code, room }) => {
+    league.roomCode = code; league.isHost = false;
+    league.qs = room.questions; league.diff = room.difficulty;
+    enterWaitingRoom(code);
+  });
+  socket.on('room_updated', (room) => {
+    league.players = room.players;
+    if (document.getElementById('screen-waiting').classList.contains('active'))
+      renderWaitingPlayers(room.players);
+  });
+  socket.on('game_started', (room) => {
+    if (!league.isHost) { league.qs = room.questions; league.diff = room.difficulty; }
+    startLeagueGame();
+  });
+  socket.on('question_changed', ({ qIdx }) => {
+    if (league.cur !== qIdx) {
+      clearInterval(league.timer); league.cur = qIdx; loadLeagueQuestion(qIdx);
+    }
+  });
+  socket.on('players_updated', (players) => { league.players = players; renderLivePlayers(); });
+  socket.on('game_finished', (players) => {
+    league.players = players; clearInterval(league.timer); finishLeague();
+  });
+  socket.on('room_closed', (msg) => {
+    showToast('⚠️ ' + msg); cleanListeners(); clearInterval(league.timer); showScreen('screen-home');
+  });
+  socket.on('join_error', (msg) => { showToast('❌ ' + msg); });
+}
 // ═══════════════════════════════════════════
 // UTILS
 // ═══════════════════════════════════════════
@@ -770,61 +812,32 @@ function getLeagueName(){
   return n || 'لاعب';
 }
 
-function createRoom() {
-  requireFirebase(() => {
-    const name = getLeagueName();
-    if (!name) { showToast('أدخل اسمك أولاً'); return; }
-    const code = genCode();
-    const myId = getMyId();
-    const diff = league.diff;
-    const qs = buildQuestions(diff,'all');
+function getCurrentUserAvatar() {
+  const user = getCurrentUser();
+  return user ? user.avatar : '⚽';
+}
 
-    db.ref(`rooms/${code}`).set({
-      host: myId,
-      status: 'waiting',
-      difficulty: diff,
-      currentQ: -1,
-      questionStartedAt: 0,
-      questions: qs,
-      players: {
-        [myId]: { name, score:0, correct:0, streak:0, best:0, answers:{}, online:true }
-      }
-    }).then(() => {
-      league.roomCode = code;
-      league.isHost = true;
-      league.myId = myId;
-      league.myName = name;
-      league.diff = diff;
-      league.qs = qs;
-      enterWaitingRoom(code);
-    }).catch(e => showToast('❌ خطأ: '+e.message));
+function createRoom() {
+  requireServer(() => {
+    const name = getLeagueName();
+    const avatar = getCurrentUserAvatar();
+    const qs = buildQuestions(league.diff, 'all');
+    league.qs = qs;
+    league.myId = socket.id;
+    league.myName = name;
+    socket.emit('create_room', { name, avatar, difficulty: league.diff, questions: qs });
   });
 }
 
 function joinRoom() {
-  requireFirebase(() => {
+  requireServer(() => {
     const code = $('join-code').value.trim().toUpperCase();
     if (code.length < 4) { showToast('أدخل كود الغرفة'); return; }
     const name = getLeagueName();
-    const myId = getMyId();
-
-    db.ref(`rooms/${code}`).once('value').then(snap => {
-      const room = snap.val();
-      if (!room) { showToast('❌ الغرفة غير موجودة'); return; }
-      if (room.status === 'finished') { showToast('❌ اللعبة انتهت بالفعل'); return; }
-
-      return db.ref(`rooms/${code}/players/${myId}`).set({
-        name, score:0, correct:0, streak:0, best:0, answers:{}, online:true
-      }).then(() => {
-        league.roomCode = code;
-        league.isHost = false;
-        league.myId = myId;
-        league.myName = name;
-        league.diff = room.difficulty;
-        league.qs = room.questions;
-        enterWaitingRoom(code);
-      });
-    }).catch(e => showToast('❌ '+e.message));
+    const avatar = getCurrentUserAvatar();
+    league.myId = socket.id;
+    league.myName = name;
+    socket.emit('join_room', { code, name, avatar });
   });
 }
 
@@ -833,63 +846,35 @@ function enterWaitingRoom(code) {
   $('btn-start-league').style.display = league.isHost ? 'flex' : 'none';
   $('waiting-hint').style.display = league.isHost ? 'none' : 'block';
   showScreen('screen-waiting');
-
-  // Remove old listeners
-  cleanListeners();
-
-  // Watch players
-  const playerRef = db.ref(`rooms/${code}/players`);
-  const playerOff = playerRef.on('value', snap => {
-    const players = snap.val() || {};
-    league.players = players;
-    renderWaitingPlayers(players);
-  });
-  league.listeners.push(() => playerRef.off('value', playerOff));
-
-  // Watch status
-  const statusRef = db.ref(`rooms/${code}/status`);
-  const statusOff = statusRef.on('value', snap => {
-    if (snap.val() === 'playing') startLeagueGame();
-  });
-  league.listeners.push(() => statusRef.off('value', statusOff));
 }
 
 function renderWaitingPlayers(players) {
-  const list = Object.entries(players);
+  const list = Object.entries(players).filter(([,p]) => p.online);
   $('waiting-players-label').textContent = `المشاركون (${list.length})`;
-  $('waiting-players').innerHTML = list.map(([id,p]) => `
-    <div class="player-item ${id===league.myId&&league.isHost?'host':''}">
-      <div class="player-avatar">⚽</div>
+  $('waiting-players').innerHTML = list.map(([id,p],idx) => `
+    <div class="player-item ${id===league.myId?'host':''}">
+      <div class="player-avatar">${p.avatar||'⚽'}</div>
       <div class="player-name">${p.name}${id===league.myId?' (أنت)':''}</div>
-      ${id===(Object.values(players).length>0?Object.keys(players)[0]:'')?'<span class="player-host-badge">مضيف</span>':''}
+      ${idx===0?'<span class="player-host-badge">مضيف</span>':''}
     </div>`).join('');
 }
 
 function hostStartGame() {
-  if (!league.isHost) return;
-  const players = Object.keys(league.players);
-  if (players.length < 1) { showToast('انتظر انضمام لاعبين'); return; }
-
-  db.ref(`rooms/${league.roomCode}`).update({
-    status: 'playing',
-    currentQ: 0,
-    questionStartedAt: firebase.database.ServerValue.TIMESTAMP
-  });
+  if (!league.isHost || !socket) return;
+  socket.emit('start_game', { code: league.roomCode });
 }
 
 function cleanListeners() {
-  league.listeners.forEach(off => off());
-  league.listeners = [];
+  // Socket.io listeners managed via setupSocketListeners
 }
 
 function leaveRoomAndGoHome() {
-  if (league.myId && league.roomCode) {
-    db.ref(`rooms/${league.roomCode}/players/${league.myId}/online`).set(false);
-  }
-  cleanListeners();
+  if (socket && league.roomCode) socket.emit('leave_room', { code: league.roomCode });
   clearInterval(league.timer);
+  league.roomCode = null; league.isHost = false;
   showScreen('screen-home');
 }
+
 
 // ═══════════════════════════════════════════
 // LEAGUE — ACTIVE GAME
@@ -904,28 +889,9 @@ function startLeagueGame() {
   showScreen('screen-quiz');
   renderDots();
 
-  // Watch currentQ
-  const qRef = db.ref(`rooms/${league.roomCode}/currentQ`);
-  const qOff = qRef.on('value', snap => {
-    const q = snap.val();
-    if (q === null || q < 0) return;
-    league.cur = q;
-    if (q >= TOTAL) {
-      clearInterval(league.timer);
-      finishLeague();
-      return;
-    }
-    loadLeagueQuestion(q);
-  });
-  league.listeners.push(() => qRef.off('value', qOff));
-
-  // Watch all players for live leaderboard
-  const pRef = db.ref(`rooms/${league.roomCode}/players`);
-  const pOff = pRef.on('value', snap => {
-    league.players = snap.val() || {};
-    renderLivePlayers();
-  });
-  league.listeners.push(() => pRef.off('value', pOff));
+  // Socket.io handles game flow via setupSocketListeners()
+  // Load first question
+  loadLeagueQuestion(0);
 }
 
 function loadLeagueQuestion(qIdx) {
@@ -972,10 +938,11 @@ function leagueTimeUp(qIdx) {
   $('reveal-ans').textContent = q.opts[q.ans];
   $('reveal').classList.add('show');
   updateDot(qIdx, false);
-  db.ref(`rooms/${league.roomCode}/players/${league.myId}`).update({
-    score: league.score, correct: league.correct
+  socket.emit('answer', {
+    code: league.roomCode, qIdx: qIdx, optIdx: -1,
+    ok: false, score: league.score, correct: league.correct
   });
-  if (league.isHost) setTimeout(() => advanceLeagueQuestion(qIdx), 2500);
+  if (league.isHost) setTimeout(() => socket.emit('advance_question', { code: league.roomCode, qIdx: qIdx }), 2500);
 }
 
 function leagueAnswer(idx) {
@@ -1003,29 +970,19 @@ function leagueAnswer(idx) {
   updateDot(qIdx, ok);
   $('score-disp').textContent = league.score;
 
-  db.ref(`rooms/${league.roomCode}/players/${league.myId}`).update({
-    score: league.score, correct: league.correct,
-    [`answers/${qIdx}`]: { opt:idx, ok }
+  socket.emit('answer', {
+    code: league.roomCode, qIdx: qIdx, optIdx: idx,
+    ok: ok, score: league.score, correct: league.correct
   });
-
   if (league.isHost) {
     const delay = ok ? 1500 : 2500;
-    setTimeout(() => {
-      // Check if all players answered
-      const allAnswered = Object.values(league.players).every(p =>
-        p.answers && p.answers[qIdx] !== undefined
-      );
-      if (allAnswered || true) advanceLeagueQuestion(qIdx);
-    }, delay);
+    setTimeout(() => socket.emit('advance_question', { code: league.roomCode, qIdx: qIdx }), delay);
   }
 }
 
 function advanceLeagueQuestion(qIdx) {
-  const next = qIdx + 1;
-  db.ref(`rooms/${league.roomCode}`).update({
-    currentQ: next,
-    questionStartedAt: firebase.database.ServerValue.TIMESTAMP
-  });
+  // handled via socket.emit('advance_question')
+  if (socket) socket.emit('advance_question', { code: league.roomCode, qIdx: qIdx });
 }
 
 function renderLivePlayers() {
@@ -1042,7 +999,7 @@ function renderLivePlayers() {
 
 function finishLeague() {
   cleanListeners();
-  if (league.isHost) db.ref(`rooms/${league.roomCode}/status`).set('finished');
+  // status handled server-side
 
   const sorted = Object.entries(league.players)
     .sort((a,b)=>(b[1].score||0)-(a[1].score||0));
@@ -1078,7 +1035,7 @@ function pickAnswer(idx) {
 // ═══════════════════════════════════════════
 // Home
 $('btn-solo').onclick = () => showScreen('screen-solo-setup');
-$('btn-league').onclick = () => requireFirebase(() => showScreen('screen-league-menu'));
+$('btn-league').onclick = () => requireServer(() => showScreen('screen-league-menu'));
 $('btn-lb-home').onclick = () => { renderLB('all'); showScreen('screen-lb'); };
 
 // Solo setup — difficulty
@@ -1230,7 +1187,7 @@ function enterHome() {
 }
 
 // Init
-tryAutoInitFirebase();
+tryAutoConnect();
 
 // Check if already logged in
 const _savedUser = getCurrentUser();
