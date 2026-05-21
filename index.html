@@ -378,6 +378,17 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
       <button class="diff-btn medium sel" data-diff="medium">🔥<br/>متوسط</button>
       <button class="diff-btn hard" data-diff="hard">💀<br/>صعب</button>
     </div>
+    <div class="section-label" style="margin-top:10px">الفئة</div>
+    <div class="cat-row" id="league-cat-row">
+      <button class="cat-btn sel" data-cat="all">الكل</button>
+      <button class="cat-btn" data-cat="football">⚽ كرة القدم</button>
+      <button class="cat-btn" data-cat="history">📜 التاريخ</button>
+      <button class="cat-btn" data-cat="geography">🌍 الجغرافيا</button>
+      <button class="cat-btn" data-cat="science">🔬 العلوم</button>
+      <button class="cat-btn" data-cat="islamic">☪️ الإسلاميات</button>
+      <button class="cat-btn" data-cat="language">📖 اللغة والأدب</button>
+      <button class="cat-btn" data-cat="math">🔢 الرياضيات</button>
+    </div>
     <button class="btn btn-primary" id="btn-create-room" style="justify-content:center">إنشاء غرفة</button>
   </div>
   <div class="room-section">
@@ -460,6 +471,7 @@ const league = {
   myId:null,
   myName:null,
   diff:"medium",
+  cat:"all",
   roomRef:null,
   listeners:[],
   players:{},
@@ -821,7 +833,7 @@ function createRoom() {
   requireServer(() => {
     const name = getLeagueName();
     const avatar = getCurrentUserAvatar();
-    const qs = buildQuestions(league.diff, 'all');
+    const qs = buildQuestions(league.diff, league.cat || 'all');
     league.qs = qs;
     league.myId = socket.id;
     league.myName = name;
@@ -1070,6 +1082,13 @@ document.querySelectorAll('#league-diff-row .diff-btn').forEach(b => {
   b.onclick = () => {
     document.querySelectorAll('#league-diff-row .diff-btn').forEach(x=>x.classList.remove('sel'));
     b.classList.add('sel'); league.diff = b.dataset.diff;
+  };
+});
+
+document.querySelectorAll('#league-cat-row .cat-btn').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('#league-cat-row .cat-btn').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel'); league.cat = b.dataset.cat;
   };
 });
 
