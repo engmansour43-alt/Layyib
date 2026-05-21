@@ -2,7 +2,7 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
 const app = express();
 const httpServer = createServer(app);
@@ -15,50 +15,61 @@ app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ═══════════════════════════════════════════
-// USER ACCOUNTS (server-side)
+// MONGODB CONNECTION
 // ═══════════════════════════════════════════
-const USERS_FILE = path.join(__dirname, 'users.json');
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://Mansour:92845844Mm@cluster0.2o9o2de.mongodb.net/layyib?appName=Cluster0';
 
-function loadUsers() {
-  try {
-    if (fs.existsSync(USERS_FILE)) return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-  } catch(e) {}
-  return {};
-}
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('✅ MongoDB متصل'))
+  .catch(err => console.error('❌ خطأ في MongoDB:', err.message));
 
-function saveUsersFile(users) {
-  try { fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); } catch(e) {}
-}
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  displayName: { type: String, required: true },
+  password: { type: String, required: true },
+  avatar: { type: String, default: '⚽' },
+  createdAt: { type: Date, default: Date.now }
+});
 
-let usersDB = loadUsers();
+const User = mongoose.model('User', userSchema);
+
+// ═══════════════════════════════════════════
+// USER ACCOUNTS API
+// ═══════════════════════════════════════════
 
 // Register
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, password, avatar } = req.body;
   if (!username || !password) return res.json({ ok: false, error: 'بيانات ناقصة' });
   if (username.length < 3) return res.json({ ok: false, error: 'الاسم قصير جداً (3 أحرف على الأقل)' });
   if (/\s/.test(username)) return res.json({ ok: false, error: 'لا تضع مسافات في الاسم' });
   if (password.length < 4) return res.json({ ok: false, error: 'كلمة المرور قصيرة (4 أحرف على الأقل)' });
 
-  const key = username.toLowerCase();
-  if (usersDB[key]) return res.json({ ok: false, error: 'اسم المستخدم مأخوذ، جرّب اسماً آخر' });
+  try {
+    const existing = await User.findOne({ username: username.toLowerCase() });
+    if (existing) return res.json({ ok: false, error: 'اسم المستخدم مأخوذ، جرّب اسماً آخر' });
 
-  usersDB[key] = { displayName: username, password, avatar: avatar || '⚽', createdAt: Date.now() };
-  saveUsersFile(usersDB);
-  res.json({ ok: true, user: { username, avatar: avatar || '⚽' } });
+    await User.create({ username: username.toLowerCase(), displayName: username, password, avatar: avatar || '⚽' });
+    res.json({ ok: true, user: { username, avatar: avatar || '⚽' } });
+  } catch (e) {
+    res.json({ ok: false, error: 'خطأ في السيرفر' });
+  }
 });
 
 // Login
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.json({ ok: false, error: 'أدخل اسم المستخدم وكلمة المرور' });
 
-  const key = username.toLowerCase();
-  const user = usersDB[key];
-  if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
-  if (user.password !== password) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
+  try {
+    const user = await User.findOne({ username: username.toLowerCase() });
+    if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
+    if (user.password !== password) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
 
-  res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar } });
+    res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar } });
+  } catch (e) {
+    res.json({ ok: false, error: 'خطأ في السيرفر' });
+  }
 });
 
 // ═══════════════════════════════════════════
@@ -116,11 +127,9 @@ io.on('connection', (socket) => {
     const room = rooms[code];
     if (!room || room.host !== socket.id) return;
     if (Object.keys(room.players).length < 1) { socket.emit('join_error', 'انتظر انضمام لاعبين'); return; }
-
     room.status = 'playing';
     room.currentQ = 0;
     room.questionStartedAt = Date.now();
-
     io.to(code).emit('game_started', sanitizeRoom(room));
     console.log(`🚀 بدأت اللعبة في الغرفة ${code}`);
   });
@@ -128,19 +137,14 @@ io.on('connection', (socket) => {
   socket.on('answer', ({ code, qIdx, optIdx, ok, score, correct }) => {
     const room = rooms[code];
     if (!room || room.status !== 'playing') return;
-
     const player = room.players[socket.id];
     if (!player || player.answers[qIdx] !== undefined) return;
-
     player.score = score;
     player.correct = correct;
     player.answers[qIdx] = { opt: optIdx, ok };
-
     io.to(code).emit('players_updated', getPlayersList(room));
-
     const activePlayers = Object.values(room.players).filter(p => p.online);
     const allAnswered = activePlayers.every(p => p.answers[qIdx] !== undefined);
-
     if (allAnswered) {
       const delay = ok ? 1500 : 2500;
       setTimeout(() => advanceQuestion(code, qIdx), delay);
@@ -153,9 +157,7 @@ io.on('connection', (socket) => {
     advanceQuestion(code, qIdx);
   });
 
-  socket.on('leave_room', ({ code }) => {
-    handleLeave(socket, code);
-  });
+  socket.on('leave_room', ({ code }) => { handleLeave(socket, code); });
 
   socket.on('disconnect', () => {
     console.log('🔴 لاعب قطع الاتصال:', socket.id);
@@ -167,7 +169,6 @@ io.on('connection', (socket) => {
 function advanceQuestion(code, qIdx) {
   const room = rooms[code];
   if (!room || room.status !== 'playing') return;
-
   const next = qIdx + 1;
   if (next >= TOTAL) {
     room.status = 'finished';
@@ -184,16 +185,13 @@ function advanceQuestion(code, qIdx) {
 function handleLeave(socket, code, disconnected = false) {
   const room = rooms[code];
   if (!room) return;
-
   if (room.players[socket.id]) room.players[socket.id].online = false;
   socket.leave(code);
-
   if (room.host === socket.id && room.status !== 'finished') {
     io.to(code).emit('room_closed', 'المضيف غادر الغرفة');
     delete rooms[code];
     return;
   }
-
   const onlinePlayers = Object.values(room.players).filter(p => p.online);
   if (onlinePlayers.length === 0) { delete rooms[code]; return; }
   if (!disconnected) delete room.players[socket.id];
@@ -202,12 +200,8 @@ function handleLeave(socket, code, disconnected = false) {
 
 function sanitizeRoom(room) {
   return {
-    host: room.host,
-    status: room.status,
-    difficulty: room.difficulty,
-    currentQ: room.currentQ,
-    questions: room.questions,
-    players: getPlayersList(room)
+    host: room.host, status: room.status, difficulty: room.difficulty,
+    currentQ: room.currentQ, questions: room.questions, players: getPlayersList(room)
   };
 }
 
@@ -220,12 +214,11 @@ function getPlayersList(room) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', rooms: Object.keys(rooms).length, users: Object.keys(usersDB).length, timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', rooms: Object.keys(rooms).length, db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected', timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`\n🎮 لعّييب - خادم اللعب الأونلاين`);
-  console.log(`🌐 الخادم يعمل على: http://localhost:${PORT}`);
-  console.log(`📊 الحالة: http://localhost:${PORT}/health\n`);
+  console.log(`🌐 الخادم يعمل على: http://localhost:${PORT}\n`);
 });
