@@ -2,6 +2,7 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const httpServer = createServer(app);
@@ -9,9 +10,60 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
+// ═══════════════════════════════════════════
+// USER ACCOUNTS (server-side)
+// ═══════════════════════════════════════════
+const USERS_FILE = path.join(__dirname, 'users.json');
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  } catch(e) {}
+  return {};
+}
+
+function saveUsersFile(users) {
+  try { fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); } catch(e) {}
+}
+
+let usersDB = loadUsers();
+
+// Register
+app.post('/api/register', (req, res) => {
+  const { username, password, avatar } = req.body;
+  if (!username || !password) return res.json({ ok: false, error: 'بيانات ناقصة' });
+  if (username.length < 3) return res.json({ ok: false, error: 'الاسم قصير جداً (3 أحرف على الأقل)' });
+  if (/\s/.test(username)) return res.json({ ok: false, error: 'لا تضع مسافات في الاسم' });
+  if (password.length < 4) return res.json({ ok: false, error: 'كلمة المرور قصيرة (4 أحرف على الأقل)' });
+
+  const key = username.toLowerCase();
+  if (usersDB[key]) return res.json({ ok: false, error: 'اسم المستخدم مأخوذ، جرّب اسماً آخر' });
+
+  usersDB[key] = { displayName: username, password, avatar: avatar || '⚽', createdAt: Date.now() };
+  saveUsersFile(usersDB);
+  res.json({ ok: true, user: { username, avatar: avatar || '⚽' } });
+});
+
+// Login
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.json({ ok: false, error: 'أدخل اسم المستخدم وكلمة المرور' });
+
+  const key = username.toLowerCase();
+  const user = usersDB[key];
+  if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
+  if (user.password !== password) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
+
+  res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar } });
+});
+
+// ═══════════════════════════════════════════
+// ROOMS
+// ═══════════════════════════════════════════
 const rooms = {};
 const TOTAL = 10;
 
@@ -25,7 +77,6 @@ function genCode() {
 io.on('connection', (socket) => {
   console.log('🟢 لاعب اتصل:', socket.id);
 
-  // إنشاء غرفة
   socket.on('create_room', ({ name, avatar, difficulty, questions }) => {
     const code = genCode();
     rooms[code] = {
@@ -46,7 +97,6 @@ io.on('connection', (socket) => {
     console.log(`🏠 غرفة جديدة: ${code} | المضيف: ${name}`);
   });
 
-  // الانضمام لغرفة
   socket.on('join_room', ({ code, name, avatar }) => {
     const room = rooms[code];
     if (!room) { socket.emit('join_error', 'الغرفة غير موجودة'); return; }
@@ -62,7 +112,6 @@ io.on('connection', (socket) => {
     console.log(`👤 ${name} انضم للغرفة ${code}`);
   });
 
-  // بدء اللعبة (المضيف فقط)
   socket.on('start_game', ({ code }) => {
     const room = rooms[code];
     if (!room || room.host !== socket.id) return;
@@ -76,7 +125,6 @@ io.on('connection', (socket) => {
     console.log(`🚀 بدأت اللعبة في الغرفة ${code}`);
   });
 
-  // إجابة لاعب
   socket.on('answer', ({ code, qIdx, optIdx, ok, score, correct }) => {
     const room = rooms[code];
     if (!room || room.status !== 'playing') return;
@@ -99,19 +147,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // المضيف يطلب تقدم السؤال (timeout)
   socket.on('advance_question', ({ code, qIdx }) => {
     const room = rooms[code];
     if (!room || room.host !== socket.id) return;
     advanceQuestion(code, qIdx);
   });
 
-  // مغادرة الغرفة
   socket.on('leave_room', ({ code }) => {
     handleLeave(socket, code);
   });
 
-  // قطع الاتصال
   socket.on('disconnect', () => {
     console.log('🔴 لاعب قطع الاتصال:', socket.id);
     const code = socket.data.roomCode;
@@ -140,9 +185,7 @@ function handleLeave(socket, code, disconnected = false) {
   const room = rooms[code];
   if (!room) return;
 
-  if (room.players[socket.id]) {
-    room.players[socket.id].online = false;
-  }
+  if (room.players[socket.id]) room.players[socket.id].online = false;
   socket.leave(code);
 
   if (room.host === socket.id && room.status !== 'finished') {
@@ -152,14 +195,8 @@ function handleLeave(socket, code, disconnected = false) {
   }
 
   const onlinePlayers = Object.values(room.players).filter(p => p.online);
-  if (onlinePlayers.length === 0) {
-    delete rooms[code];
-    return;
-  }
-
-  if (!disconnected) {
-    delete room.players[socket.id];
-  }
+  if (onlinePlayers.length === 0) { delete rooms[code]; return; }
+  if (!disconnected) delete room.players[socket.id];
   io.to(code).emit('room_updated', sanitizeRoom(room));
 }
 
@@ -183,7 +220,7 @@ function getPlayersList(room) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', rooms: Object.keys(rooms).length, timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', rooms: Object.keys(rooms).length, users: Object.keys(usersDB).length, timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 3000;

@@ -1148,7 +1148,7 @@ function selectAvatar(el) {
   selectedAvatar = el.dataset.av;
 }
 
-function doLogin() {
+async function doLogin() {
   const username = $('login-user').value.trim();
   const password = $('login-pass').value;
   const errEl = $('login-error');
@@ -1156,16 +1156,24 @@ function doLogin() {
 
   if (!username || !password) { errEl.textContent = '⚠️ أدخل اسم المستخدم وكلمة المرور'; return; }
 
-  const users = getUsers();
-  const user = users[username.toLowerCase()];
-  if (!user) { errEl.textContent = '❌ اسم المستخدم غير موجود'; return; }
-  if (user.password !== password) { errEl.textContent = '❌ كلمة المرور غير صحيحة'; return; }
-
-  setCurrentUser({ username: user.displayName, avatar: user.avatar });
-  enterHome();
+  try {
+    const serverUrl = localStorage.getItem('layyib_server') || '';
+    const base = serverUrl || '';
+    const res = await fetch(base + '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!data.ok) { errEl.textContent = '❌ ' + data.error; return; }
+    setCurrentUser(data.user);
+    enterHome();
+  } catch(e) {
+    errEl.textContent = '❌ تعذر الاتصال بالسيرفر';
+  }
 }
 
-function doRegister() {
+async function doRegister() {
   const username = $('reg-user').value.trim();
   const pass1 = $('reg-pass').value;
   const pass2 = $('reg-pass2').value;
@@ -1179,13 +1187,21 @@ function doRegister() {
   if (pass1.length < 4) { errEl.textContent = '⚠️ كلمة المرور قصيرة (4 أحرف على الأقل)'; return; }
   if (pass1 !== pass2) { errEl.textContent = '❌ كلمتا المرور غير متطابقتين'; return; }
 
-  const users = getUsers();
-  if (users[username.toLowerCase()]) { errEl.textContent = '❌ اسم المستخدم مأخوذ، جرّب اسماً آخر'; return; }
-
-  users[username.toLowerCase()] = { displayName: username, password: pass1, avatar: selectedAvatar, createdAt: Date.now() };
-  saveUsers(users);
-  setCurrentUser({ username, avatar: selectedAvatar });
-  enterHome();
+  try {
+    const serverUrl = localStorage.getItem('layyib_server') || '';
+    const base = serverUrl || '';
+    const res = await fetch(base + '/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: pass1, avatar: selectedAvatar })
+    });
+    const data = await res.json();
+    if (!data.ok) { errEl.textContent = '❌ ' + data.error; return; }
+    setCurrentUser(data.user);
+    enterHome();
+  } catch(e) {
+    errEl.textContent = '❌ تعذر الاتصال بالسيرفر';
+  }
 }
 
 function doLogout() {
