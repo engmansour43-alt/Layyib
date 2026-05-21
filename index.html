@@ -647,6 +647,7 @@ function buildQuestions(diff, cat) {
 // SOLO GAME
 // ═══════════════════════════════════════════
 function startSolo() {
+  SFX.play('start');
   solo.qs = buildQuestions(solo.diff, solo.cat);
   solo.cur=0; solo.score=0; solo.correct=0; solo.streak=0; solo.best=0; solo.results=[];
   league.mode = false;
@@ -679,6 +680,7 @@ function showSoloQuestion() {
   solo.timer = setInterval(() => {
     solo.timeLeft--;
     updateTimerUI(solo.timeLeft, TIME[solo.diff]);
+    if (solo.timeLeft <= 3 && solo.timeLeft > 0) SFX.play('tick');
     if (solo.timeLeft <= 0) { clearInterval(solo.timer); soloTimeUp(); }
   }, 1000);
 }
@@ -717,11 +719,11 @@ function soloAnswer(idx) {
     const bonus = Math.ceil(solo.timeLeft/TIME[solo.diff]*50);
     solo.score += PTS[solo.diff]+bonus;
     solo.correct++; solo.streak++; solo.best = Math.max(solo.best,solo.streak);
-    flashScreen('ok');
+    flashScreen('ok'); SFX.play('correct');
     const msg = ['','','🔥 سلسلة ×2','🔥🔥 ×3','⚡ ×4','💥 ×5'];
     $('streak-msg').textContent = solo.streak>=2 ? (msg[Math.min(solo.streak,5)]||`🌟×${solo.streak}`) : '';
   } else {
-    solo.streak=0; flashScreen('bad'); $('streak-msg').textContent='';
+    solo.streak=0; flashScreen('bad'); $('streak-msg').textContent=''; SFX.play('wrong');
   }
   solo.results[solo.cur] = ok;
   revealSoloAnswer(idx);
@@ -751,6 +753,7 @@ function soloNext() {
 }
 
 function soloEnd() {
+  SFX.play('finish');
   const acc = Math.round(solo.correct/TOTAL*100);
   let emoji='😔', title='يمكنك التحسن!';
   if (acc>=90){emoji='🏆';title='بطل كروي!'}
@@ -970,11 +973,11 @@ function leagueAnswer(idx) {
     const bonus = Math.ceil(league.timeLeft/TIME[league.diff]*50);
     league.score += PTS[league.diff]+bonus;
     league.correct++; league.streak++; league.best=Math.max(league.best,league.streak);
-    flashScreen('ok');
+    flashScreen('ok'); SFX.play('correct');
     const msg=['','','🔥×2','🔥🔥×3','⚡×4','💥×5'];
     $('streak-msg').textContent = league.streak>=2?(msg[Math.min(league.streak,5)]||`🌟×${league.streak}`):'';
   } else {
-    league.streak=0; flashScreen('bad');
+    league.streak=0; flashScreen('bad'); SFX.play('wrong');
   }
 
   renderOptions(q, idx, true);
@@ -1010,6 +1013,7 @@ function renderLivePlayers() {
 }
 
 function finishLeague() {
+  SFX.play('finish');
   cleanListeners();
   // status handled server-side
 
@@ -1229,6 +1233,76 @@ const _savedUser = getCurrentUser();
 if (_savedUser) {
   enterHome();
 }
+
+// ═══════════════════════════════════════════
+// SOUND ENGINE
+// ═══════════════════════════════════════════
+const SFX = (() => {
+  let ctx = null;
+  function getCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  function play(type) {
+    try {
+      const c = getCtx();
+      switch(type) {
+        case 'correct': playCorrect(c); break;
+        case 'wrong':   playWrong(c);   break;
+        case 'start':   playStart(c);   break;
+        case 'finish':  playFinish(c);  break;
+        case 'tick':    playTick(c);    break;
+      }
+    } catch(e) {}
+  }
+
+  function tone(ctx, freq, start, dur, type='sine', vol=0.3) {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = type; o.frequency.setValueAtTime(freq, start);
+    g.gain.setValueAtTime(vol, start);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    o.start(start); o.stop(start + dur + 0.05);
+  }
+
+  function playCorrect(c) {
+    const t = c.currentTime;
+    tone(c, 523, t,       0.12, 'sine', 0.3);
+    tone(c, 659, t+0.1,   0.12, 'sine', 0.3);
+    tone(c, 784, t+0.2,   0.25, 'sine', 0.35);
+  }
+
+  function playWrong(c) {
+    const t = c.currentTime;
+    tone(c, 300, t,     0.15, 'sawtooth', 0.25);
+    tone(c, 220, t+0.1, 0.25, 'sawtooth', 0.2);
+  }
+
+  function playStart(c) {
+    const t = c.currentTime;
+    const notes = [392, 440, 523, 659, 784];
+    notes.forEach((f, i) => tone(c, f, t + i*0.1, 0.15, 'sine', 0.25));
+  }
+
+  function playFinish(c) {
+    const t = c.currentTime;
+    const notes = [523, 659, 784, 1047, 784, 1047];
+    const durs  = [0.1, 0.1, 0.1, 0.15, 0.1, 0.3];
+    let acc = 0;
+    notes.forEach((f, i) => { tone(c, f, t+acc, durs[i], 'sine', 0.3); acc += durs[i] + 0.02; });
+  }
+
+  function playTick(c) {
+    const t = c.currentTime;
+    tone(c, 880, t, 0.05, 'square', 0.15);
+  }
+
+  return { play };
+})();
+
 </script>
 </body>
 </html>
