@@ -466,7 +466,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
   <button class="btn btn-danger" style="margin-top:8px" onclick="clearLB()">🗑️ مسح السجل</button>
 </div>
 
-<script src="questions.js?v=2"></script>
+<script src="questions.js?v=3"></script>
 <script>
 
 const TOTAL = 10;
@@ -669,19 +669,44 @@ function getMyId() {
   return id;
 }
 
+// Reject any question with corrupted data so it never lands in a game.
+function isValidQuestion(q) {
+  if (!q || typeof q !== 'object') return false;
+  if (!q.text || typeof q.text !== 'string' || !q.text.trim()) return false;
+  if (!Array.isArray(q.opts) || q.opts.length !== 4) return false;
+  if (q.opts.some(o => !o || typeof o !== 'string' || !o.trim())) return false;
+  if (typeof q.ans !== 'number' || q.ans < 0 || q.ans > 3) return false;
+  if (!q.opts[q.ans]) return false;
+  // No duplicate options
+  const set = new Set(q.opts); if (set.size !== q.opts.length) return false;
+  // Reject CJK or Cyrillic mixed into Arabic content (corruption marker)
+  const all = q.text + ' ' + q.opts.join(' ');
+  if (/[\u4E00-\u9FFF]/.test(all)) return false;
+  if (/[\u0400-\u04FF]/.test(all)) return false;
+  return true;
+}
+
+// Pre-filter QDB once at load — only valid questions are usable.
+const QDB_CLEAN = (typeof QDB !== 'undefined' && Array.isArray(QDB))
+  ? QDB.filter(isValidQuestion) : [];
+if (typeof QDB !== 'undefined' && Array.isArray(QDB) && QDB.length !== QDB_CLEAN.length) {
+  console.warn('Filtered out ' + (QDB.length - QDB_CLEAN.length) + ' invalid questions');
+}
+
 function buildQuestions(diff, cat) {
+  const SRC = QDB_CLEAN;
   if (cat === 'all') {
-    let pool = QDB.filter(q => q.diff === diff);
-    if (pool.length < TOTAL) pool = [...QDB];
+    let pool = SRC.filter(q => q.diff === diff);
+    if (pool.length < TOTAL) pool = [...SRC];
     return shuffle(pool).slice(0, TOTAL);
   }
   // نفس الفئة: الأولوية للصعوبة المختارة، ثم باقي صعوبات نفس الفئة
-  const primary   = shuffle(QDB.filter(q => q.cat === cat && q.diff === diff));
-  const secondary = shuffle(QDB.filter(q => q.cat === cat && q.diff !== diff));
+  const primary   = shuffle(SRC.filter(q => q.cat === cat && q.diff === diff));
+  const secondary = shuffle(SRC.filter(q => q.cat === cat && q.diff !== diff));
   const pool = [...primary, ...secondary];
   // احتياط فقط إن نقصت الأسئلة عن 10 في الفئة كلها
   if (pool.length < TOTAL) {
-    const extra = shuffle(QDB.filter(q => q.cat !== cat && q.diff === diff));
+    const extra = shuffle(SRC.filter(q => q.cat !== cat && q.diff === diff));
     return pool.concat(extra).slice(0, TOTAL);
   }
   return pool.slice(0, TOTAL);
@@ -707,6 +732,13 @@ function renderDots() {
 
 function showSoloQuestion() {
   const q = solo.qs[solo.cur];
+  if (!isValidQuestion(q)) {
+    console.warn('Skipping invalid solo question at index', solo.cur, q);
+    showToast('❗ تم تخطي سؤال تالف');
+    solo.results[solo.cur] = false;
+    setTimeout(soloNext, 600);
+    return;
+  }
   solo.timeLeft = TIME[solo.diff];
   solo.answered = false;
   $('q-num').textContent = `سؤال ${solo.cur+1}/${TOTAL}`;
@@ -1006,6 +1038,15 @@ function loadLeagueQuestion(qIdx) {
   clearInterval(league.timer);
   league.answered = false;
   const q = league.qs[qIdx];
+  // Safety net: if data is missing/corrupt, auto-skip so the game can't hang.
+  if (!isValidQuestion(q)) {
+    console.warn('Skipping invalid league question at index', qIdx, q);
+    showToast('❗ تم تخطي سؤال تالف');
+    if (league.isHost && socket && socket.connected) {
+      socket.emit('advance_question', { code: league.roomCode, qIdx });
+    }
+    return;
+  }
   const maxTime = TIME[league.diff];
   league.timeLeft = maxTime;
 
