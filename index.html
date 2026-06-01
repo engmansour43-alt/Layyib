@@ -405,7 +405,8 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     <div class="room-code-value" id="wroom-code">------</div>
     <div class="room-code-hint">شارك الكود مع أصدقائك</div>
   </div>
-  <button class="btn btn-outline btn-sm" id="btn-copy-code" style="margin-bottom:16px;width:100%">📋 نسخ الكود</button>
+  <button class="btn btn-outline btn-sm" id="btn-copy-code" style="margin-bottom:8px;width:100%">📋 نسخ الكود</button>
+  <button class="btn btn-blue btn-sm" id="btn-copy-link" style="margin-bottom:16px;width:100%">🔗 نسخ رابط الدعوة</button>
   <div class="section-label" id="waiting-players-label">المشاركون (0)</div>
   <div class="player-list" id="waiting-players"></div>
   <div class="waiting-hint" id="waiting-hint">في انتظار المضيف لبدء اللعبة...</div>
@@ -1101,6 +1102,13 @@ $('join-code').addEventListener('input', e => { e.target.value=e.target.value.to
 $('btn-copy-code').onclick = () => {
   navigator.clipboard?.writeText(league.roomCode).then(()=>showToast('📋 تم نسخ الكود!')).catch(()=>showToast(league.roomCode));
 };
+$('btn-copy-link').onclick = () => {
+  const link = buildInviteLink(league.roomCode);
+  navigator.clipboard?.writeText(link).then(()=>showToast('🔗 تم نسخ الرابط!')).catch(()=>showToast(link));
+  if (navigator.share) {
+    navigator.share({ title: 'دعوة لعبة لعّييب', text: 'انضم للعبة!', url: link }).catch(()=>{});
+  }
+};
 $('btn-start-league').onclick = hostStartGame;
 $('btn-leave-room').onclick = leaveRoomAndGoHome;
 
@@ -1222,6 +1230,58 @@ function enterHome() {
   showScreen('screen-home');
 }
 
+// ─────────────────────────────────────────
+// INVITE LINK (deep-link auto-join)
+// ─────────────────────────────────────────
+function buildInviteLink(code) {
+  const u = new URL(window.location.href);
+  u.search = ''; u.hash = '';
+  u.searchParams.set('room', code);
+  return u.toString();
+}
+
+function getInviteRoomCode() {
+  try {
+    const u = new URL(window.location.href);
+    const code = (u.searchParams.get('room') || '').trim().toUpperCase();
+    if (code && /^[A-Z0-9]{4,8}$/.test(code)) return code;
+  } catch(e){}
+  return null;
+}
+
+function clearInviteFromUrl() {
+  try {
+    const u = new URL(window.location.href);
+    u.searchParams.delete('room');
+    window.history.replaceState({}, '', u.toString());
+  } catch(e){}
+}
+
+function autoJoinFromInvite(code) {
+  // Need a server connection first; if not configured, fall through to normal flow
+  // which will show the server URL modal. The code stays in the URL until we use it.
+  requireServer(() => {
+    const user = getCurrentUser();
+    if (user) {
+      // Logged in: jump straight in
+      league.cat = league.cat || 'all';
+      league.diff = league.diff || 'medium';
+      league.myId = getMyId();
+      league.myName = user.username;
+      socket.emit('join_room', { pid: league.myId, code, name: user.username, avatar: user.avatar || '⚽' });
+      clearInviteFromUrl();
+    } else {
+      // Not logged in: send them to league menu with the code prefilled.
+      // They sign in / set a name first, then hit Join.
+      showScreen('screen-league-menu');
+      const input = $('join-code');
+      if (input) { input.value = code; }
+      showToast('🔗 الرمز ' + code + ' جاهز — سجل دخولك أو أدخل اسمك ثم اضغط انضمام');
+      clearInviteFromUrl();
+    }
+  });
+}
+
 // Init
 tryAutoConnect();
 
@@ -1229,6 +1289,13 @@ tryAutoConnect();
 const _savedUser = getCurrentUser();
 if (_savedUser) {
   enterHome();
+}
+
+// If the URL has ?room=XXXX, try to auto-join after init.
+const _inviteCode = getInviteRoomCode();
+if (_inviteCode) {
+  // Defer a tick to let socket connection start
+  setTimeout(() => autoJoinFromInvite(_inviteCode), 300);
 }
 
 // ═══════════════════════════════════════════
