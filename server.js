@@ -80,6 +80,14 @@ const TOTAL = 10;
 const ADVANCE_DELAY_OK = 1500;
 const ADVANCE_DELAY_BAD = 2500;
 
+// ═══════════════════════════════════════════
+// MATCHMAKING QUEUE
+// ═══════════════════════════════════════════
+// Entries: { pid, sid, name, avatar, diff, cat, questions, joinedAt }
+let matchmakingQueue = [];
+const RELAX_AFTER_MS = 15000;   // After 15s of waiting, match with anyone
+const QUEUE_TICK_MS = 2000;
+
 function genCode() {
   let code;
   do { code = Math.random().toString(36).substr(2, 6).toUpperCase(); }
@@ -91,6 +99,71 @@ function genCode() {
 function pidOf(socket, payloadPid) {
   return (payloadPid && typeof payloadPid === 'string') ? payloadPid : socket.id;
 }
+
+function queueRemove(pid) {
+  matchmakingQueue = matchmakingQueue.filter(e => e.pid !== pid);
+}
+
+function findMatchFor(entry) {
+  // Strict: same diff + same cat
+  const strict = matchmakingQueue.find(o => o.pid !== entry.pid && o.diff === entry.diff && o.cat === entry.cat);
+  if (strict) return { partner: strict, relaxed: false };
+  // Relaxed: waiting > RELAX_AFTER_MS — pair with anyone
+  const now = Date.now();
+  if (now - entry.joinedAt >= RELAX_AFTER_MS) {
+    const any = matchmakingQueue.find(o => o.pid !== entry.pid);
+    if (any) return { partner: any, relaxed: true };
+  }
+  return null;
+}
+
+function createMatchRoom(a, b) {
+  // a = host (first to queue). Use a's questions/diff/cat for the room.
+  const code = genCode();
+  rooms[code] = {
+    host: a.pid,
+    status: 'playing',
+    difficulty: a.diff,
+    questions: a.questions,
+    currentQ: 0,
+    questionStartedAt: Date.now(),
+    advanceTimer: null,
+    matched: true,
+    players: {
+      [a.pid]: { sid: a.sid, name: a.name, avatar: a.avatar || '⚽', score: 0, correct: 0, answers: {}, online: true },
+      [b.pid]: { sid: b.sid, name: b.name, avatar: b.avatar || '⚽', score: 0, correct: 0, answers: {}, online: true }
+    }
+  };
+  // Bind both sockets to the room
+  const sockA = io.sockets.sockets.get(a.sid);
+  const sockB = io.sockets.sockets.get(b.sid);
+  if (sockA) { sockA.data.pid = a.pid; sockA.data.roomCode = code; sockA.join(code); }
+  if (sockB) { sockB.data.pid = b.pid; sockB.data.roomCode = code; sockB.join(code); }
+
+  // Notify both — they jump straight into the game
+  io.to(code).emit('match_found', { code, room: sanitizeRoom(rooms[code]) });
+  io.to(code).emit('game_started', sanitizeRoom(rooms[code]));
+  console.log(`🎯 جولة مباراة: ${a.name} vs ${b.name} (${code})`);
+}
+
+// Periodic queue scan: try to relax-match anyone who's been waiting
+setInterval(() => {
+  if (matchmakingQueue.length < 2) return;
+  // Iterate over a snapshot since we may remove entries
+  const snapshot = [...matchmakingQueue];
+  for (const entry of snapshot) {
+    // Re-check entry still in queue
+    if (!matchmakingQueue.some(e => e.pid === entry.pid)) continue;
+    const m = findMatchFor(entry);
+    if (m) {
+      queueRemove(entry.pid);
+      queueRemove(m.partner.pid);
+      // entry queued earlier? Use whichever joined first as host (for question source)
+      const [host, guest] = entry.joinedAt <= m.partner.joinedAt ? [entry, m.partner] : [m.partner, entry];
+      createMatchRoom(host, guest);
+    }
+  }
+}, QUEUE_TICK_MS);
 
 io.on('connection', (socket) => {
   console.log('🟢 لاعب اتصل:', socket.id);
@@ -207,10 +280,51 @@ io.on('connection', (socket) => {
 
   socket.on('leave_room', ({ code }) => { handleLeave(socket, code); });
 
+  // ── Matchmaking ──
+  socket.on('find_match', ({ pid, name, avatar, diff, cat, questions }) => {
+    const myPid = pidOf(socket, pid);
+    if (!Array.isArray(questions) || questions.length < TOTAL) {
+      socket.emit('match_error', 'فشل في تجهيز الأسئلة');
+      return;
+    }
+    // Reject if already in a room
+    if (socket.data.roomCode && rooms[socket.data.roomCode]) {
+      socket.emit('match_error', 'أنت بالفعل في غرفة');
+      return;
+    }
+    // Remove any stale entry
+    queueRemove(myPid);
+    const entry = {
+      pid: myPid, sid: socket.id, name: name || 'لاعب', avatar: avatar || '⚽',
+      diff: diff || 'medium', cat: cat || 'all', questions, joinedAt: Date.now()
+    };
+    socket.data.pid = myPid;
+    // Try to match immediately
+    const m = findMatchFor(entry);
+    if (m) {
+      queueRemove(m.partner.pid);
+      const [host, guest] = entry.joinedAt <= m.partner.joinedAt ? [entry, m.partner] : [m.partner, entry];
+      createMatchRoom(host, guest);
+      return;
+    }
+    matchmakingQueue.push(entry);
+    socket.emit('match_searching', { position: matchmakingQueue.length });
+    console.log(`🔍 ${entry.name} يبحث عن خصم (${entry.diff}/${entry.cat}) — طابور: ${matchmakingQueue.length}`);
+  });
+
+  socket.on('cancel_match', ({ pid }) => {
+    const myPid = pidOf(socket, pid);
+    queueRemove(myPid);
+    socket.emit('match_cancelled');
+  });
+
   socket.on('disconnect', () => {
     console.log('🔴 لاعب قطع الاتصال:', socket.id);
     const code = socket.data.roomCode;
     if (code) handleLeave(socket, code, true);
+    // Also remove from matchmaking queue if present
+    const myPid = socket.data.pid;
+    if (myPid) queueRemove(myPid);
   });
 });
 

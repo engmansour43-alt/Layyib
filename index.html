@@ -19,6 +19,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 .screen{display:none;width:100%;max-width:480px;min-height:100vh;padding:20px 16px;flex-direction:column;align-items:center;animation:fi .3s ease}
 .screen.active{display:flex}
 @keyframes fi{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
 /* ── LOGO ── */
 .game-logo{font-size:64px;margin:28px 0 6px;filter:drop-shadow(0 0 20px #00e66460)}
@@ -370,6 +371,11 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     <div class="section-label">اسمك في اللعبة</div>
     <input class="name-input" id="league-name" type="text" placeholder="أدخل اسمك..." maxlength="20" style="margin-bottom:0" />
   </div>
+  <div class="room-section" style="background:linear-gradient(135deg,#0a2540,#0f1a2e);border:2px solid var(--blue)">
+    <div class="room-section-title">🎯 البحث عن خصم</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;text-align:center">الصعوبة والفئة تؤخذ من الإعدادات أسفل</div>
+    <button class="btn btn-primary" id="btn-find-match" style="justify-content:center;background:linear-gradient(135deg,#3b82f6,#1d4ed8)">🔍 ابحث عن خصم الآن</button>
+  </div>
   <div class="room-section">
     <div class="room-section-title">🏠 إنشاء غرفة جديدة</div>
     <div class="section-label">مستوى الصعوبة</div>
@@ -395,6 +401,19 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     <div class="room-section-title">🚪 انضمام لغرفة</div>
     <input class="code-input" id="join-code" type="text" placeholder="XXXXXX" maxlength="6" />
     <button class="btn btn-blue" id="btn-join-room">انضمام</button>
+  </div>
+</div>
+
+<!-- ══════════ MATCHMAKING SEARCH ══════════ -->
+<div class="screen" id="screen-matchmaking">
+  <div style="text-align:center;padding:40px 20px">
+    <div style="font-size:64px;margin-bottom:20px;animation:fi 0.5s ease">🎯</div>
+    <div style="font-size:22px;font-weight:700;margin-bottom:8px">جارٍ البحث عن خصم...</div>
+    <div id="mm-status" style="color:var(--muted);margin-bottom:24px;font-size:14px">اتصال بالخادم...</div>
+    <div class="loader-spinner" style="width:60px;height:60px;border:5px solid #1a2740;border-top-color:var(--blue);border-radius:50%;margin:0 auto 24px;animation:spin 1s linear infinite"></div>
+    <div id="mm-elapsed" style="font-size:18px;font-weight:700;color:var(--blue);margin-bottom:24px">00:00</div>
+    <div id="mm-relax-hint" style="font-size:12px;color:var(--muted);margin-bottom:24px;display:none">توسيع البحث لأي خصم متاح...</div>
+    <button class="btn btn-danger" id="btn-cancel-match" style="width:100%;max-width:300px;margin:0 auto">إلغاء البحث</button>
   </div>
 </div>
 
@@ -584,6 +603,30 @@ function setupSocketListeners() {
     showToast('⚠️ ' + msg); cleanListeners(); clearInterval(league.timer); showScreen('screen-home');
   });
   socket.on('join_error', (msg) => { showToast('❌ ' + msg); });
+
+  // ── Matchmaking events ──
+  socket.on('match_searching', () => {
+    $('mm-status').textContent = 'في طابور البحث...';
+  });
+  socket.on('match_found', ({ code, room }) => {
+    stopMatchTimer();
+    league.roomCode = code;
+    league.isHost = (room.host === league.myId);
+    league.qs = room.questions;
+    league.diff = room.difficulty;
+    league.players = room.players;
+    showToast('🎯 تم العثور على خصم!');
+    // game_started will follow immediately
+  });
+  socket.on('match_cancelled', () => {
+    stopMatchTimer();
+    showScreen('screen-league-menu');
+  });
+  socket.on('match_error', (msg) => {
+    stopMatchTimer();
+    showToast('❌ ' + msg);
+    showScreen('screen-league-menu');
+  });
 }
 // ═══════════════════════════════════════════
 // UTILS
@@ -857,6 +900,55 @@ function joinRoom() {
   });
 }
 
+// ─────────────────────────────────────────
+// MATCHMAKING
+// ─────────────────────────────────────────
+let mmTimer = null;
+let mmStartedAt = 0;
+function stopMatchTimer() {
+  if (mmTimer) { clearInterval(mmTimer); mmTimer = null; }
+}
+function startMatchTimer() {
+  mmStartedAt = Date.now();
+  $('mm-elapsed').textContent = '00:00';
+  $('mm-relax-hint').style.display = 'none';
+  stopMatchTimer();
+  mmTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - mmStartedAt) / 1000);
+    const m = String(Math.floor(sec/60)).padStart(2,'0');
+    const s = String(sec%60).padStart(2,'0');
+    $('mm-elapsed').textContent = `${m}:${s}`;
+    if (sec >= 15) $('mm-relax-hint').style.display = 'block';
+  }, 500);
+}
+
+function findMatch() {
+  requireServer(() => {
+    const name = getLeagueName();
+    const avatar = getCurrentUserAvatar();
+    const diff = league.diff || 'medium';
+    const cat = league.cat || 'all';
+    const qs = buildQuestions(diff, cat);
+    league.qs = qs;
+    league.cat = cat;
+    league.diff = diff;
+    league.myId = getMyId();
+    league.myName = name;
+    showScreen('screen-matchmaking');
+    $('mm-status').textContent = 'في طابور البحث...';
+    startMatchTimer();
+    socket.emit('find_match', { pid: league.myId, name, avatar, diff, cat, questions: qs });
+  });
+}
+
+function cancelMatch() {
+  if (socket && socket.connected) {
+    socket.emit('cancel_match', { pid: league.myId || getMyId() });
+  }
+  stopMatchTimer();
+  showScreen('screen-league-menu');
+}
+
 function enterWaitingRoom(code) {
   $('wroom-code').textContent = code;
   $('btn-start-league').style.display = league.isHost ? 'flex' : 'none';
@@ -1096,6 +1188,8 @@ document.querySelectorAll('#league-cat-row .cat-btn').forEach(b => {
 
 $('btn-create-room').onclick = createRoom;
 $('btn-join-room').onclick = joinRoom;
+$('btn-find-match').onclick = findMatch;
+$('btn-cancel-match').onclick = cancelMatch;
 $('join-code').addEventListener('input', e => { e.target.value=e.target.value.toUpperCase(); });
 
 // Waiting room
