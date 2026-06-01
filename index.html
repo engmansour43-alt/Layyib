@@ -446,7 +446,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
   <button class="btn btn-danger" style="margin-top:8px" onclick="clearLB()">🗑️ مسح السجل</button>
 </div>
 
-<script src="questions.js"></script>
+<script src="questions.js?v=2"></script>
 <script>
 
 const TOTAL = 10;
@@ -838,9 +838,9 @@ function createRoom() {
     const avatar = getCurrentUserAvatar();
     const qs = buildQuestions(league.diff, league.cat || 'all');
     league.qs = qs;
-    league.myId = socket.id;
+    league.myId = getMyId();
     league.myName = name;
-    socket.emit('create_room', { name, avatar, difficulty: league.diff, questions: qs });
+    socket.emit('create_room', { pid: league.myId, name, avatar, difficulty: league.diff, questions: qs });
   });
 }
 
@@ -850,9 +850,9 @@ function joinRoom() {
     if (code.length < 4) { showToast('أدخل كود الغرفة'); return; }
     const name = getLeagueName();
     const avatar = getCurrentUserAvatar();
-    league.myId = socket.id;
+    league.myId = getMyId();
     league.myName = name;
-    socket.emit('join_room', { code, name, avatar });
+    socket.emit('join_room', { pid: league.myId, code, name, avatar });
   });
 }
 
@@ -957,7 +957,7 @@ function leagueTimeUp(qIdx) {
     code: league.roomCode, qIdx: qIdx, optIdx: -1,
     ok: false, score: league.score, correct: league.correct
   });
-  if (league.isHost) setTimeout(() => socket.emit('advance_question', { code: league.roomCode, qIdx: qIdx }), 2500);
+  // Server handles auto-advance once all online players answered.
 }
 
 function leagueAnswer(idx) {
@@ -989,10 +989,7 @@ function leagueAnswer(idx) {
     code: league.roomCode, qIdx: qIdx, optIdx: idx,
     ok: ok, score: league.score, correct: league.correct
   });
-  if (league.isHost) {
-    const delay = ok ? 1500 : 2500;
-    setTimeout(() => socket.emit('advance_question', { code: league.roomCode, qIdx: qIdx }), delay);
-  }
+  // Server handles auto-advance once all online players answered.
 }
 
 function advanceLeagueQuestion(qIdx) {

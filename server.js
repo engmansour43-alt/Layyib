@@ -77,6 +77,8 @@ app.post('/api/login', async (req, res) => {
 // ═══════════════════════════════════════════
 const rooms = {};
 const TOTAL = 10;
+const ADVANCE_DELAY_OK = 1500;
+const ADVANCE_DELAY_BAD = 2500;
 
 function genCode() {
   let code;
@@ -85,47 +87,80 @@ function genCode() {
   return code;
 }
 
+// Resolve player id: prefer client-provided persistent pid, fall back to socket.id
+function pidOf(socket, payloadPid) {
+  return (payloadPid && typeof payloadPid === 'string') ? payloadPid : socket.id;
+}
+
 io.on('connection', (socket) => {
   console.log('🟢 لاعب اتصل:', socket.id);
 
-  socket.on('create_room', ({ name, avatar, difficulty, questions }) => {
+  socket.on('create_room', ({ pid, name, avatar, difficulty, questions }) => {
+    const myPid = pidOf(socket, pid);
     const code = genCode();
     rooms[code] = {
-      host: socket.id,
+      host: myPid,
       status: 'waiting',
       difficulty,
       questions,
       currentQ: -1,
       questionStartedAt: 0,
+      advanceTimer: null,
       players: {
-        [socket.id]: { name, avatar: avatar || '⚽', score: 0, correct: 0, answers: {}, online: true }
+        [myPid]: { sid: socket.id, name, avatar: avatar || '⚽', score: 0, correct: 0, answers: {}, online: true }
       }
     };
-    socket.join(code);
+    socket.data.pid = myPid;
     socket.data.roomCode = code;
+    socket.join(code);
     socket.emit('room_created', { code });
     io.to(code).emit('room_updated', sanitizeRoom(rooms[code]));
-    console.log(`🏠 غرفة جديدة: ${code} | المضيف: ${name}`);
+    console.log(`🏠 غرفة جديدة: ${code} | المضيف: ${name} (${myPid})`);
   });
 
-  socket.on('join_room', ({ code, name, avatar }) => {
+  socket.on('join_room', ({ pid, code, name, avatar }) => {
+    const myPid = pidOf(socket, pid);
     const room = rooms[code];
     if (!room) { socket.emit('join_error', 'الغرفة غير موجودة'); return; }
+
+    // Rejoin: if this pid is already in the room, treat as reconnect.
+    if (room.players[myPid]) {
+      const player = room.players[myPid];
+      player.sid = socket.id;
+      player.online = true;
+      // Allow rejoin even during 'playing' state (handles refresh / reconnect)
+      socket.data.pid = myPid;
+      socket.data.roomCode = code;
+      socket.join(code);
+      socket.emit('room_joined', { code, room: sanitizeRoom(room) });
+      // If game already in progress, send them straight to current question
+      if (room.status === 'playing') {
+        socket.emit('game_started', sanitizeRoom(room));
+        socket.emit('question_changed', { qIdx: room.currentQ });
+      }
+      io.to(code).emit('room_updated', sanitizeRoom(room));
+      console.log(`🔄 ${name} أعاد الاتصال للغرفة ${code}`);
+      return;
+    }
+
     if (room.status === 'finished') { socket.emit('join_error', 'اللعبة انتهت بالفعل'); return; }
     if (room.status === 'playing') { socket.emit('join_error', 'اللعبة بدأت بالفعل'); return; }
     if (Object.keys(room.players).length >= 8) { socket.emit('join_error', 'الغرفة ممتلئة (8 لاعبين كحد أقصى)'); return; }
 
-    room.players[socket.id] = { name, avatar: avatar || '⚽', score: 0, correct: 0, answers: {}, online: true };
-    socket.join(code);
+    room.players[myPid] = { sid: socket.id, name, avatar: avatar || '⚽', score: 0, correct: 0, answers: {}, online: true };
+    socket.data.pid = myPid;
     socket.data.roomCode = code;
+    socket.join(code);
     socket.emit('room_joined', { code, room: sanitizeRoom(room) });
     io.to(code).emit('room_updated', sanitizeRoom(room));
-    console.log(`👤 ${name} انضم للغرفة ${code}`);
+    console.log(`👤 ${name} انضم للغرفة ${code} (${myPid})`);
   });
 
   socket.on('start_game', ({ code }) => {
     const room = rooms[code];
-    if (!room || room.host !== socket.id) return;
+    if (!room) return;
+    const myPid = socket.data.pid;
+    if (room.host !== myPid) return;
     if (Object.keys(room.players).length < 1) { socket.emit('join_error', 'انتظر انضمام لاعبين'); return; }
     room.status = 'playing';
     room.currentQ = 0;
@@ -137,23 +172,36 @@ io.on('connection', (socket) => {
   socket.on('answer', ({ code, qIdx, optIdx, ok, score, correct }) => {
     const room = rooms[code];
     if (!room || room.status !== 'playing') return;
-    const player = room.players[socket.id];
+    // Only accept answers for the CURRENT question
+    if (qIdx !== room.currentQ) return;
+    const myPid = socket.data.pid;
+    const player = room.players[myPid];
     if (!player || player.answers[qIdx] !== undefined) return;
     player.score = score;
     player.correct = correct;
     player.answers[qIdx] = { opt: optIdx, ok };
     io.to(code).emit('players_updated', getPlayersList(room));
+
     const activePlayers = Object.values(room.players).filter(p => p.online);
+    if (activePlayers.length === 0) return;
     const allAnswered = activePlayers.every(p => p.answers[qIdx] !== undefined);
-    if (allAnswered) {
-      const delay = ok ? 1500 : 2500;
-      setTimeout(() => advanceQuestion(code, qIdx), delay);
+    if (allAnswered && !room.advanceTimer) {
+      const delay = ok ? ADVANCE_DELAY_OK : ADVANCE_DELAY_BAD;
+      room.advanceTimer = setTimeout(() => {
+        room.advanceTimer = null;
+        advanceQuestion(code, qIdx);
+      }, delay);
     }
   });
 
   socket.on('advance_question', ({ code, qIdx }) => {
     const room = rooms[code];
-    if (!room || room.host !== socket.id) return;
+    if (!room) return;
+    const myPid = socket.data.pid;
+    if (room.host !== myPid) return;
+    // Idempotent: only advance if the qIdx matches current
+    if (qIdx !== room.currentQ) return;
+    if (room.advanceTimer) { clearTimeout(room.advanceTimer); room.advanceTimer = null; }
     advanceQuestion(code, qIdx);
   });
 
@@ -169,6 +217,8 @@ io.on('connection', (socket) => {
 function advanceQuestion(code, qIdx) {
   const room = rooms[code];
   if (!room || room.status !== 'playing') return;
+  // Idempotency guard: only advance from the *current* question
+  if (qIdx !== room.currentQ) return;
   const next = qIdx + 1;
   if (next >= TOTAL) {
     room.status = 'finished';
@@ -185,16 +235,33 @@ function advanceQuestion(code, qIdx) {
 function handleLeave(socket, code, disconnected = false) {
   const room = rooms[code];
   if (!room) return;
-  if (room.players[socket.id]) room.players[socket.id].online = false;
+  const myPid = socket.data.pid;
+  if (myPid && room.players[myPid]) room.players[myPid].online = false;
   socket.leave(code);
-  if (room.host === socket.id && room.status !== 'finished') {
+
+  // If the host disconnects mid-waiting, close the room.
+  // But during play, give them a chance to reconnect — keep room alive.
+  if (myPid && room.host === myPid && room.status === 'waiting') {
     io.to(code).emit('room_closed', 'المضيف غادر الغرفة');
     delete rooms[code];
     return;
   }
+
   const onlinePlayers = Object.values(room.players).filter(p => p.online);
-  if (onlinePlayers.length === 0) { delete rooms[code]; return; }
-  if (!disconnected) delete room.players[socket.id];
+  if (onlinePlayers.length === 0) {
+    // No one's left — clean up after a short grace period (allow reconnect)
+    setTimeout(() => {
+      const r = rooms[code];
+      if (!r) return;
+      const stillEmpty = Object.values(r.players).every(p => !p.online);
+      if (stillEmpty) {
+        console.log(`🗑️  حذف غرفة فارغة: ${code}`);
+        delete rooms[code];
+      }
+    }, 60 * 1000);
+  }
+
+  if (!disconnected && myPid) delete room.players[myPid];
   io.to(code).emit('room_updated', sanitizeRoom(room));
 }
 
