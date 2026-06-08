@@ -511,11 +511,12 @@ const league = {
 // SOCKET.IO
 // ═══════════════════════════════════════════
 let socket = null;
+const DEFAULT_SERVER_URL = 'https://layyib.onrender.com';
 
 function connectToServer(url, onSuccess, onFail) {
   if (socket) { socket.disconnect(); socket = null; }
-  const serverUrl = (url || 'http://localhost:3000').trim();
-  socket = io(serverUrl, { timeout: 5000, reconnectionAttempts: 3 });
+  const serverUrl = (url || DEFAULT_SERVER_URL).trim();
+  socket = io(serverUrl, { timeout: 8000, reconnectionAttempts: 3 });
 
   const timeout = setTimeout(() => {
     if (!socket.connected) {
@@ -523,13 +524,12 @@ function connectToServer(url, onSuccess, onFail) {
       showToast('❌ تعذّر الاتصال بالخادم');
       if (onFail) onFail();
     }
-  }, 5000);
+  }, 8000);
 
   socket.on('connect', () => {
     clearTimeout(timeout);
     localStorage.setItem('layyib_server', serverUrl);
     setupSocketListeners();
-    showToast('✅ متصل بالخادم!');
     if (onSuccess) onSuccess();
   });
 
@@ -538,14 +538,13 @@ function connectToServer(url, onSuccess, onFail) {
 }
 
 function tryAutoConnect() {
-  const url = localStorage.getItem('layyib_server');
-  if (!url) return false;
+  const url = localStorage.getItem('layyib_server') || DEFAULT_SERVER_URL;
   connectToServer(url, null, null);
   return true;
 }
 
 function saveServerConfig() {
-  const url = document.getElementById('server-url-input').value.trim() || 'http://localhost:3000';
+  const url = document.getElementById('server-url-input').value.trim() || DEFAULT_SERVER_URL;
   connectToServer(url, () => {
     closeFirebaseModal();
     showScreen('screen-league-menu');
@@ -558,14 +557,10 @@ function closeFirebaseModal() {
 
 function requireServer(onReady) {
   if (socket && socket.connected) { onReady(); return; }
-  const url = localStorage.getItem('layyib_server');
-  if (url) {
-    connectToServer(url, onReady, () => {
-      document.getElementById('firebase-modal').style.display = 'flex';
-    });
-    return;
-  }
-  document.getElementById('firebase-modal').style.display = 'flex';
+  const url = localStorage.getItem('layyib_server') || DEFAULT_SERVER_URL;
+  connectToServer(url, onReady, () => {
+    showToast('❌ تعذّر الاتصال بالخادم، حاول مرة ثانية');
+  });
 }
 
 function setupSocketListeners() {
