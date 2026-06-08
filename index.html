@@ -1284,8 +1284,13 @@ $('btn-copy-link').onclick = () => {
 $('btn-start-league').onclick = hostStartGame;
 $('btn-leave-room').onclick = leaveRoomAndGoHome;
 
-// League results
-$('btn-league-again').onclick = () => showScreen('screen-league-menu');
+// League results — غادر الغرفة السابقة قبل الرجوع للقائمة
+$('btn-league-again').onclick = () => {
+  if (socket && league.roomCode) socket.emit('leave_room', { code: league.roomCode });
+  clearInterval(league.timer);
+  league.roomCode = null; league.isHost = false; league.mode = false;
+  showScreen('screen-league-menu');
+};
 
 // Leaderboard filter
 document.querySelectorAll('#lb-filter .cat-btn').forEach(b => {

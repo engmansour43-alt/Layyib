@@ -170,6 +170,10 @@ io.on('connection', (socket) => {
 
   socket.on('create_room', ({ pid, name, avatar, difficulty, questions }) => {
     const myPid = pidOf(socket, pid);
+    // تنظيف: إذا كان اللاعب في غرفة سابقة (بالذات منتهية)، أخرجه تلقائياً
+    if (socket.data.roomCode && rooms[socket.data.roomCode]) {
+      handleLeave(socket, socket.data.roomCode);
+    }
     const code = genCode();
     rooms[code] = {
       host: myPid,
@@ -287,10 +291,15 @@ io.on('connection', (socket) => {
       socket.emit('match_error', 'فشل في تجهيز الأسئلة');
       return;
     }
-    // Reject if already in a room
+    // إذا كان في غرفة منتهية، أخرجه تلقائياً؛ وإذا في غرفة نشطة، ارفض
     if (socket.data.roomCode && rooms[socket.data.roomCode]) {
-      socket.emit('match_error', 'أنت بالفعل في غرفة');
-      return;
+      const r = rooms[socket.data.roomCode];
+      if (r.status === 'finished') {
+        handleLeave(socket, socket.data.roomCode);
+      } else {
+        socket.emit('match_error', 'أنت بالفعل في غرفة');
+        return;
+      }
     }
     // Remove any stale entry
     queueRemove(myPid);
