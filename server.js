@@ -398,6 +398,21 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', rooms: Object.keys(rooms).length, db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected', timestamp: new Date().toISOString() });
 });
 
+// ═══════════════════════════════════════════
+// KEEP-ALIVE (منع خمول Render المجاني)
+// ═══════════════════════════════════════════
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
+if (SELF_URL) {
+  const KEEP_ALIVE_MS = 10 * 60 * 1000; // كل 10 دقايق
+  setInterval(() => {
+    const url = `${SELF_URL.replace(/\/$/, '')}/health`;
+    fetch(url).then(r => r.json())
+      .then(() => console.log(`💓 keep-alive ping → ${url}`))
+      .catch(err => console.warn('⚠️ keep-alive failed:', err.message));
+  }, KEEP_ALIVE_MS);
+  console.log(`💓 Keep-alive مفعّل (${SELF_URL})`);
+}
+
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`\n🎮 لعّييب - خادم اللعب الأونلاين`);

@@ -1412,6 +1412,15 @@ function autoJoinFromInvite(code) {
   });
 }
 
+// Pre-warm السيرفر (يصحّي Render مبكراً)
+function prewarmServer() {
+  const url = localStorage.getItem('layyib_server') || DEFAULT_SERVER_URL;
+  fetch(`${url.replace(/\/$/, '')}/health`, { method: 'GET', cache: 'no-store' })
+    .then(() => console.log('✅ السيرفر جاهز'))
+    .catch(() => {});
+}
+prewarmServer();
+
 // Init
 tryAutoConnect();
 
