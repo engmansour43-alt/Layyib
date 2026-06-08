@@ -855,8 +855,8 @@ function soloNext() {
 }
 
 function soloEnd() {
-  SFX.play('finish');
   const acc = Math.round(solo.correct/TOTAL*100);
+  SFX.play('finish', { won: acc >= 50 });
   let emoji='😔', title='يمكنك التحسن!';
   if (acc>=90){emoji='🏆';title='بطل كروي!'}
   else if (acc>=70){emoji='⭐';title='ممتاز جداً!'}
@@ -1170,12 +1170,14 @@ function renderLivePlayers() {
 }
 
 function finishLeague() {
-  SFX.play('finish');
   cleanListeners();
   // status handled server-side
 
   const sorted = Object.entries(league.players)
     .sort((a,b)=>(b[1].score||0)-(a[1].score||0));
+  // فوز = اللاعب في أول مركز (بين الجميع)
+  const iWon = sorted.length > 0 && sorted[0][0] === league.myId;
+  SFX.play('finish', { won: iWon });
 
   const ranks = ['🥇','🥈','🥉'];
   const podiumCls = ['p1','p2','p3'];
@@ -1479,15 +1481,17 @@ const SFX = (() => {
     return ctx;
   }
 
-  function play(type) {
+  function play(type, opts) {
     try {
       const c = getCtx();
       switch(type) {
         case 'correct': playCorrect(c); break;
         case 'wrong':   playWrong(c);   break;
         case 'start':   playStart(c);   break;
-        case 'finish':  playFinish(c);  break;
+        case 'finish':  playFinish(c, opts && opts.won);  break;
         case 'tick':    playTick(c);    break;
+        case 'cheer':   playCheer(c);   break;
+        case 'sigh':    playSigh(c);    break;
       }
     } catch(e) {}
   }
@@ -1521,7 +1525,10 @@ const SFX = (() => {
     notes.forEach((f, i) => tone(c, f, t + i*0.1, 0.15, 'sine', 0.25));
   }
 
-  function playFinish(c) {
+  function playFinish(c, won) {
+    // backwards compatible: if won not specified, play upbeat jingle
+    if (won === true)  { playCheer(c); return; }
+    if (won === false) { playSigh(c);  return; }
     const t = c.currentTime;
     const notes = [523, 659, 784, 1047, 784, 1047];
     const durs  = [0.1, 0.1, 0.1, 0.15, 0.1, 0.3];
@@ -1532,6 +1539,116 @@ const SFX = (() => {
   function playTick(c) {
     const t = c.currentTime;
     tone(c, 880, t, 0.05, 'square', 0.15);
+  }
+
+  // ─── توليد ضوضاء الجمهور (white noise buffer) ───
+  let _noiseBuf = null;
+  function getNoiseBuffer(c) {
+    if (_noiseBuf) return _noiseBuf;
+    const len = c.sampleRate * 3.0;
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    _noiseBuf = buf;
+    return buf;
+  }
+
+  // 👏 تصفيق + هتاف (انتصار)
+  function playCheer(c) {
+    const t = c.currentTime;
+    const dur = 2.8;
+
+    // طبقة 1: تصفيق — بوفر ضوضاء عالي التردد مع أمساك سريع
+    const claps = c.createBufferSource();
+    claps.buffer = getNoiseBuffer(c);
+    const clapFilter = c.createBiquadFilter();
+    clapFilter.type = 'highpass'; clapFilter.frequency.value = 2000;
+    const clapGain = c.createGain();
+    clapGain.gain.setValueAtTime(0.0001, t);
+    clapGain.gain.exponentialRampToValueAtTime(0.35, t + 0.15);
+    // نبضات تصفيق عشوائية على مدى الصوت
+    for (let i = 0; i < 24; i++) {
+      const tt = t + 0.15 + i * 0.09 + (Math.random()*0.05);
+      clapGain.gain.setValueAtTime(0.05, tt);
+      clapGain.gain.exponentialRampToValueAtTime(0.4 + Math.random()*0.2, tt + 0.01);
+      clapGain.gain.exponentialRampToValueAtTime(0.05, tt + 0.06);
+    }
+    clapGain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    claps.connect(clapFilter); clapFilter.connect(clapGain); clapGain.connect(c.destination);
+    claps.start(t); claps.stop(t + dur);
+
+    // طبقة 2: هتاف جماهيري (ضوضاء بنطاق متوسط + LFO)
+    const crowd = c.createBufferSource();
+    crowd.buffer = getNoiseBuffer(c);
+    const crowdFilter = c.createBiquadFilter();
+    crowdFilter.type = 'bandpass';
+    crowdFilter.frequency.value = 900;
+    crowdFilter.Q.value = 0.7;
+    const crowdGain = c.createGain();
+    crowdGain.gain.setValueAtTime(0.0001, t);
+    crowdGain.gain.exponentialRampToValueAtTime(0.2, t + 0.3);
+    crowdGain.gain.setValueAtTime(0.2, t + dur - 0.6);
+    crowdGain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    // LFO لإحساس تجمع بشري
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 3.5;
+    const lfoGain = c.createGain();
+    lfoGain.gain.value = 0.08;
+    lfo.connect(lfoGain); lfoGain.connect(crowdGain.gain);
+    crowd.connect(crowdFilter); crowdFilter.connect(crowdGain); crowdGain.connect(c.destination);
+    crowd.start(t); crowd.stop(t + dur);
+    lfo.start(t); lfo.stop(t + dur);
+
+    // طبقة 3: ترنيمة صغيرة أعلى التصفيق
+    const notes = [523, 659, 784, 1047];
+    notes.forEach((f, i) => tone(c, f, t + 0.2 + i*0.12, 0.18, 'sine', 0.18));
+  }
+
+  // 😔 حسرة الجمهور (خسارة)
+  function playSigh(c) {
+    const t = c.currentTime;
+    const dur = 2.5;
+
+    // طبقة 1: ضوضاء جماهيرية مع فلتر ينخفض (إحساس تنهد جماعي)
+    const crowd = c.createBufferSource();
+    crowd.buffer = getNoiseBuffer(c);
+    const filter = c.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 0.9;
+    filter.frequency.setValueAtTime(900, t);
+    filter.frequency.exponentialRampToValueAtTime(280, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.4);
+    g.gain.setValueAtTime(0.35, t + 0.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    crowd.connect(filter); filter.connect(g); g.connect(c.destination);
+    crowd.start(t); crowd.stop(t + dur);
+
+    // طبقة 2: نغمة هابطة حزينة (تعبير درامي)
+    const o = c.createOscillator();
+    const og = c.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(440, t + 0.2);
+    o.frequency.exponentialRampToValueAtTime(220, t + 1.6);
+    og.gain.setValueAtTime(0.0001, t + 0.2);
+    og.gain.exponentialRampToValueAtTime(0.18, t + 0.4);
+    og.gain.setValueAtTime(0.18, t + 1.2);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+    o.connect(og); og.connect(c.destination);
+    o.start(t + 0.2); o.stop(t + 1.8);
+
+    // طبقة 3: نغمة ثانية أعمق (طبقة ثالثة للتنهد)
+    const o2 = c.createOscillator();
+    const og2 = c.createGain();
+    o2.type = 'sine';
+    o2.frequency.setValueAtTime(330, t + 0.5);
+    o2.frequency.exponentialRampToValueAtTime(165, t + 1.9);
+    og2.gain.setValueAtTime(0.0001, t + 0.5);
+    og2.gain.exponentialRampToValueAtTime(0.12, t + 0.7);
+    og2.gain.exponentialRampToValueAtTime(0.0001, t + 2.0);
+    o2.connect(og2); og2.connect(c.destination);
+    o2.start(t + 0.5); o2.stop(t + 2.1);
   }
 
   return { play };
