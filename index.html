@@ -1175,9 +1175,18 @@ function finishLeague() {
 
   const sorted = Object.entries(league.players)
     .sort((a,b)=>(b[1].score||0)-(a[1].score||0));
-  // فوز = اللاعب في أول مركز (بين الجميع)
-  const iWon = sorted.length > 0 && sorted[0][0] === league.myId;
-  SFX.play('finish', { won: iWon });
+  // تحديد النتيجة: فوز / خسارة / تعادل
+  let outcome = false;
+  if (sorted.length > 0) {
+    const topScore = sorted[0][1].score || 0;
+    const myScore = (league.players[league.myId] && league.players[league.myId].score) || 0;
+    // من تعادل مع أعلى نتيجة؟ (أكثر من لاعب بنفس النقاط)
+    const topPlayers = sorted.filter(([,p]) => (p.score||0) === topScore);
+    if (myScore === topScore && topPlayers.length > 1) outcome = 'draw';
+    else if (myScore === topScore) outcome = true;
+    else outcome = false;
+  }
+  SFX.play('finish', { won: outcome });
 
   const ranks = ['🥇','🥈','🥉'];
   const podiumCls = ['p1','p2','p3'];
@@ -1492,6 +1501,7 @@ const SFX = (() => {
         case 'tick':    playTick(c);    break;
         case 'cheer':   playCheer(c);   break;
         case 'sigh':    playSigh(c);    break;
+        case 'draw':    playDraw(c);    break;
       }
     } catch(e) {}
   }
@@ -1527,8 +1537,9 @@ const SFX = (() => {
 
   function playFinish(c, won) {
     // backwards compatible: if won not specified, play upbeat jingle
-    if (won === true)  { playCheer(c); return; }
-    if (won === false) { playSigh(c);  return; }
+    if (won === 'draw') { playDraw(c);  return; }
+    if (won === true)   { playCheer(c); return; }
+    if (won === false)  { playSigh(c);  return; }
     const t = c.currentTime;
     const notes = [523, 659, 784, 1047, 784, 1047];
     const durs  = [0.1, 0.1, 0.1, 0.15, 0.1, 0.3];
@@ -1649,6 +1660,72 @@ const SFX = (() => {
     og2.gain.exponentialRampToValueAtTime(0.0001, t + 2.0);
     o2.connect(og2); og2.connect(c.destination);
     o2.start(t + 0.5); o2.stop(t + 2.1);
+  }
+
+  // ⚖️ تعادل — صفّارة الحكم + جمهور محايد
+  function playDraw(c) {
+    const t = c.currentTime;
+    const dur = 2.6;
+
+    // ── طبقة 1: صفّارة الحكم — ضوضاء عالي بفلتر حاد جداً على تردد عالي + نبرة صافية
+    function whistleBurst(start, len, freq) {
+      // نبرة صافية تمثّل لسان الصفّارة
+      const o = c.createOscillator();
+      const og = c.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(freq, start);
+      o.frequency.linearRampToValueAtTime(freq * 1.03, start + 0.02);
+      og.gain.setValueAtTime(0.0001, start);
+      og.gain.exponentialRampToValueAtTime(0.28, start + 0.02);
+      og.gain.setValueAtTime(0.28, start + len - 0.04);
+      og.gain.exponentialRampToValueAtTime(0.0001, start + len);
+      o.connect(og); og.connect(c.destination);
+      o.start(start); o.stop(start + len + 0.02);
+
+      // طبقة ضوضاء خفيفة تعطي إحساس النفخ
+      const n = c.createBufferSource();
+      n.buffer = getNoiseBuffer(c);
+      const nf = c.createBiquadFilter();
+      nf.type = 'highpass'; nf.frequency.value = 3500;
+      const ng = c.createGain();
+      ng.gain.setValueAtTime(0.0001, start);
+      ng.gain.exponentialRampToValueAtTime(0.08, start + 0.02);
+      ng.gain.setValueAtTime(0.08, start + len - 0.04);
+      ng.gain.exponentialRampToValueAtTime(0.0001, start + len);
+      n.connect(nf); nf.connect(ng); ng.connect(c.destination);
+      n.start(start); n.stop(start + len + 0.02);
+    }
+
+    // ثلاث نفخات (إشارة نهاية المباراة)
+    whistleBurst(t,        0.18, 2200);
+    whistleBurst(t + 0.28, 0.18, 2200);
+    whistleBurst(t + 0.56, 0.55, 2200); // تطويلة في الأخيرة
+
+    // ── طبقة 2: جمهور محايد (همهمة دون حماس أو إحباط)
+    const crowd = c.createBufferSource();
+    crowd.buffer = getNoiseBuffer(c);
+    const cf = c.createBiquadFilter();
+    cf.type = 'bandpass';
+    cf.frequency.value = 500;
+    cf.Q.value = 0.6;
+    const cg = c.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.exponentialRampToValueAtTime(0.18, t + 0.5);
+    cg.gain.setValueAtTime(0.18, t + dur - 0.6);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    // LFO خفيف لإحساس بشري هادئ
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 2.2;
+    const lg = c.createGain();
+    lg.gain.value = 0.05;
+    lfo.connect(lg); lg.connect(cg.gain);
+    crowd.connect(cf); cf.connect(cg); cg.connect(c.destination);
+    crowd.start(t); crowd.stop(t + dur);
+    lfo.start(t); lfo.stop(t + dur);
+
+    // ── طبقة 3: نغمتان متعادلتان (بعد الصفّارة)
+    tone(c, 523, t + 1.4, 0.32, 'sine', 0.18); // C5
+    tone(c, 523, t + 1.75, 0.4, 'sine', 0.18); // نفس النغمة (تعادل)
   }
 
   return { play };
