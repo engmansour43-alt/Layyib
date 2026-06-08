@@ -856,7 +856,7 @@ function soloNext() {
 
 function soloEnd() {
   const acc = Math.round(solo.correct/TOTAL*100);
-  SFX.play('finish', { won: acc >= 50 });
+  SFX.play('finish', { won: acc >= 70 });
   let emoji='😔', title='يمكنك التحسن!';
   if (acc>=90){emoji='🏆';title='بطل كروي!'}
   else if (acc>=70){emoji='⭐';title='ممتاز جداً!'}
