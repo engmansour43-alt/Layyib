@@ -1543,7 +1543,7 @@ const SFX = (() => {
 
   function playFinish(c, won) {
     // backwards compatible: if won not specified, play upbeat jingle
-    if (won === 'draw') { playDraw(c);  return; }
+    if (won === 'draw') { playCheer(c); return; } // تعادل = تصفيق للمتنافسين
     if (won === true)   { playCheer(c); return; }
     if (won === false)  { playSigh(c);  return; }
     const t = c.currentTime;
