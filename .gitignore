@@ -2,3 +2,12 @@ node_modules/
 .env
 *.log
 .github-token
+shot-*.png
+solo-setup.png
+logos-preview.png
+snap-logos.js
+snap-screens.js
+build-review.js
+review.html
+logos-preview.html
+render-icons.js

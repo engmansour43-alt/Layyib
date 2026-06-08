@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <meta name="theme-color" content="#060e0a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="alternate icon" type="image/png" href="./favicon.png" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <link rel="manifest" href="./manifest.json" />
   <title>لعّييب</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
@@ -23,6 +27,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 
 /* ── LOGO ── */
 .game-logo{font-size:64px;margin:28px 0 6px;filter:drop-shadow(0 0 20px #00e66460)}
+.game-logo-svg{width:96px;height:96px;margin:28px 0 6px;filter:drop-shadow(0 0 24px #ffd70055) drop-shadow(0 0 16px #00e66455);display:block}
 .game-title{font-size:40px;font-weight:900;background:linear-gradient(135deg,#00e664,#00aaff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px}
 .game-subtitle{font-size:13px;color:var(--muted);margin:4px 0 32px;text-align:center}
 
@@ -39,23 +44,24 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 .btn-danger{background:transparent;border:2px solid #ff4444;color:#ff4444;justify-content:center;font-size:15px}
 .btn-sm{width:auto;padding:10px 18px;font-size:13px;margin-bottom:0;justify-content:center}
 .btn-blue{background:linear-gradient(135deg,#0080cc,#004d99);color:#fff;justify-content:center;box-shadow:0 4px 16px rgba(0,128,204,.3)}
+.btn-start-big{padding:28px;font-size:24px;font-weight:900;letter-spacing:1.5px;border-radius:20px;box-shadow:0 8px 32px rgba(0,230,100,.4);margin-top:24px !important;margin-bottom:14px;position:sticky;bottom:14px;z-index:5}
 
 /* ── CARD ── */
 .card{background:var(--card);border-radius:16px;padding:18px;width:100%;margin-bottom:14px;border:1px solid rgba(0,230,100,.08)}
-.section-label{font-size:13px;color:var(--muted);margin-bottom:10px;align-self:flex-start}
+.section-label{font-size:17px;color:var(--muted);margin-bottom:14px;align-self:flex-start;font-weight:700}
 
 /* ── DIFFICULTY ── */
-.diff-row{display:flex;gap:10px;width:100%;margin-bottom:20px}
-.diff-btn{flex:1;padding:14px 4px;border-radius:12px;border:2px solid transparent;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:center;transition:all .2s}
+.diff-row{display:flex;gap:14px;width:100%;margin-bottom:28px}
+.diff-btn{flex:1;padding:28px 8px;border-radius:18px;border:3px solid transparent;font-weight:900;cursor:pointer;font-family:inherit;text-align:center;transition:all .2s;line-height:1.5;font-size:22px}
 .diff-btn.easy{background:#0f2518;color:#5dde8a;border-color:#1a5030}
 .diff-btn.medium{background:#2a1e08;color:#f5c842;border-color:#5a4010}
 .diff-btn.hard{background:#2a0808;color:#f04040;border-color:#5a1010}
-.diff-btn.sel{transform:scale(1.06);box-shadow:0 0 0 3px rgba(255,255,255,.15)}
+.diff-btn.sel{transform:scale(1.08);box-shadow:0 0 0 4px rgba(255,255,255,.18)}
 
 /* ── CAT CHIPS ── */
-.cat-row{display:flex;gap:8px;flex-wrap:wrap;width:100%;margin-bottom:20px}
-.cat-btn{padding:8px 14px;border-radius:20px;border:2px solid rgba(0,230,100,.2);background:#0d1a10;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .2s}
-.cat-btn.sel{background:var(--green3);color:#fff;border-color:var(--green)}
+.cat-row{display:flex;gap:12px;flex-wrap:wrap;width:100%;margin-bottom:28px}
+.cat-btn{padding:18px 24px;border-radius:28px;border:2px solid rgba(0,230,100,.2);background:#0d1a10;color:var(--muted);font-size:19px;font-weight:800;cursor:pointer;font-family:inherit;transition:all .2s;line-height:1.2}
+.cat-btn.sel{background:var(--green3);color:#fff;border-color:var(--green);transform:scale(1.05);box-shadow:0 0 0 3px rgba(0,230,100,.22)}
 
 /* ── QUIZ ── */
 .quiz-top{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:10px}
@@ -226,7 +232,19 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 
 <!-- ══════════ AUTH ══════════ -->
 <div class="screen active" id="screen-auth">
-  <div class="game-logo" style="margin-top:40px">🏆</div>
+  <svg class="game-logo-svg" style="margin-top:40px" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg" aria-label="شعلة المعرفة">
+    <defs>
+      <radialGradient id="lg-bg-a" cx="50%" cy="60%" r="50%"><stop offset="0%" stop-color="#ffd700" stop-opacity="0.2"/><stop offset="100%" stop-color="#ffd700" stop-opacity="0"/></radialGradient>
+      <linearGradient id="lg-flame-a" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#fff5a8"/><stop offset="40%" stop-color="#ffd700"/><stop offset="100%" stop-color="#ff8c00"/></linearGradient>
+      <linearGradient id="lg-base-a" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00e664"/><stop offset="100%" stop-color="#007a33"/></linearGradient>
+    </defs>
+    <circle cx="70" cy="80" r="60" fill="url(#lg-bg-a)"/>
+    <path d="M 70 20 Q 50 40 50 60 Q 50 80 62 88 Q 56 78 62 70 Q 65 78 70 74 Q 75 78 78 70 Q 84 78 78 88 Q 90 80 90 60 Q 90 40 70 20 Z" fill="url(#lg-flame-a)"/>
+    <path d="M 70 40 Q 62 55 62 68 Q 62 78 70 82 Q 78 78 78 68 Q 78 55 70 40 Z" fill="#fff5a8" opacity="0.7"/>
+    <rect x="48" y="92" width="44" height="8" rx="4" fill="url(#lg-base-a)"/>
+    <rect x="52" y="102" width="36" height="6" rx="3" fill="#007a33"/>
+    <circle cx="70" cy="60" r="3" fill="#ffffff"/>
+  </svg>
   <div class="game-title">لعّييب</div>
   <div class="game-subtitle">فكّر. سابق. انتصر</div>
 
@@ -276,7 +294,19 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     </div>
     <button class="home-logout-btn" onclick="doLogout()">خروج</button>
   </div>
-  <div class="game-logo">🏆</div>
+  <svg class="game-logo-svg" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg" aria-label="شعلة المعرفة">
+    <defs>
+      <radialGradient id="lg-bg-b" cx="50%" cy="60%" r="50%"><stop offset="0%" stop-color="#ffd700" stop-opacity="0.2"/><stop offset="100%" stop-color="#ffd700" stop-opacity="0"/></radialGradient>
+      <linearGradient id="lg-flame-b" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#fff5a8"/><stop offset="40%" stop-color="#ffd700"/><stop offset="100%" stop-color="#ff8c00"/></linearGradient>
+      <linearGradient id="lg-base-b" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00e664"/><stop offset="100%" stop-color="#007a33"/></linearGradient>
+    </defs>
+    <circle cx="70" cy="80" r="60" fill="url(#lg-bg-b)"/>
+    <path d="M 70 20 Q 50 40 50 60 Q 50 80 62 88 Q 56 78 62 70 Q 65 78 70 74 Q 75 78 78 70 Q 84 78 78 88 Q 90 80 90 60 Q 90 40 70 20 Z" fill="url(#lg-flame-b)"/>
+    <path d="M 70 40 Q 62 55 62 68 Q 62 78 70 82 Q 78 78 78 68 Q 78 55 70 40 Z" fill="#fff5a8" opacity="0.7"/>
+    <rect x="48" y="92" width="44" height="8" rx="4" fill="url(#lg-base-b)"/>
+    <rect x="52" y="102" width="36" height="6" rx="3" fill="#007a33"/>
+    <circle cx="70" cy="60" r="3" fill="#ffffff"/>
+  </svg>
   <div class="game-title">لعّييب</div>
   <div class="game-subtitle">فكّر. سابق. انتصر</div>
   <button class="btn btn-primary" id="btn-solo">
@@ -309,11 +339,12 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
   </div>
   <div class="section-label">مستوى الصعوبة</div>
   <div class="diff-row">
-    <button class="diff-btn easy" data-diff="easy">😊<br/>سهل</button>
-    <button class="diff-btn medium sel" data-diff="medium">🔥<br/>متوسط</button>
-    <button class="diff-btn hard" data-diff="hard">💀<br/>صعب</button>
+    <button class="diff-btn easy" data-diff="easy"><span style="font-size:34px;display:block;margin-bottom:6px">😊</span>سهل</button>
+    <button class="diff-btn medium sel" data-diff="medium"><span style="font-size:34px;display:block;margin-bottom:6px">🔥</span>متوسط</button>
+    <button class="diff-btn hard" data-diff="hard"><span style="font-size:34px;display:block;margin-bottom:6px">💀</span>صعب</button>
   </div>
-  <button class="btn btn-primary" id="btn-start-solo" style="justify-content:center;margin-top:8px">ابدأ اللعب ▶</button>
+  <div style="flex:1;min-height:30px"></div>
+  <button class="btn btn-primary btn-start-big" id="btn-start-solo" style="justify-content:center;margin-top:auto">ابدأ اللعب ▶</button>
 </div>
 
 <!-- ══════════ QUIZ (solo + league) ══════════ -->
@@ -380,9 +411,9 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     <div class="room-section-title">🏠 إنشاء غرفة جديدة</div>
     <div class="section-label">مستوى الصعوبة</div>
     <div class="diff-row" id="league-diff-row">
-      <button class="diff-btn easy" data-diff="easy">😊<br/>سهل</button>
-      <button class="diff-btn medium sel" data-diff="medium">🔥<br/>متوسط</button>
-      <button class="diff-btn hard" data-diff="hard">💀<br/>صعب</button>
+      <button class="diff-btn easy" data-diff="easy"><span style="font-size:34px;display:block;margin-bottom:6px">😊</span>سهل</button>
+      <button class="diff-btn medium sel" data-diff="medium"><span style="font-size:34px;display:block;margin-bottom:6px">🔥</span>متوسط</button>
+      <button class="diff-btn hard" data-diff="hard"><span style="font-size:34px;display:block;margin-bottom:6px">💀</span>صعب</button>
     </div>
     <div class="section-label" style="margin-top:10px">الفئة</div>
     <div class="cat-row" id="league-cat-row">
