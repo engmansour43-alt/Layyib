@@ -743,6 +743,9 @@ function buildQuestions(diff, cat) {
 // ═══════════════════════════════════════════
 function startSolo() {
   SFX.play('start');
+  // تحميل أصوات النهاية في الخلفية لتجنب تأخير البدء
+  try { new Audio('./sounds/applause.mp3').preload='auto'; } catch(e){}
+  try { new Audio('./sounds/disappointment.ogg').preload='auto'; } catch(e){}
   solo.qs = buildQuestions(solo.diff, solo.cat);
   solo.cur=0; solo.score=0; solo.correct=0; solo.streak=0; solo.best=0; solo.results=[];
   league.mode = false;
@@ -1508,6 +1511,7 @@ const SFX = (() => {
         case 'cheer':   playCheer(c);   break;
         case 'sigh':    playSigh(c);    break;
         case 'draw':    playDraw(c);    break;
+        case 'preload': /* warm audio files */ break;
       }
     } catch(e) {}
   }
@@ -1570,60 +1574,50 @@ const SFX = (() => {
     return buf;
   }
 
-  // 👏 تصفيق فقط (فوز أو تعادل)
-  function playCheer(c) {
-    const t = c.currentTime;
-    const dur = 2.8;
-
-    // تصفيق جماهيري — ضوضاء عالي التردد مع نبضات عشوائية
-    const claps = c.createBufferSource();
-    claps.buffer = getNoiseBuffer(c);
-    const clapFilter = c.createBiquadFilter();
-    clapFilter.type = 'highpass'; clapFilter.frequency.value = 2000;
-    const clapGain = c.createGain();
-    clapGain.gain.setValueAtTime(0.0001, t);
-    clapGain.gain.exponentialRampToValueAtTime(0.35, t + 0.15);
-    for (let i = 0; i < 24; i++) {
-      const tt = t + 0.15 + i * 0.09 + (Math.random()*0.05);
-      clapGain.gain.setValueAtTime(0.05, tt);
-      clapGain.gain.exponentialRampToValueAtTime(0.4 + Math.random()*0.2, tt + 0.01);
-      clapGain.gain.exponentialRampToValueAtTime(0.05, tt + 0.06);
-    }
-    clapGain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    claps.connect(clapFilter); clapFilter.connect(clapGain); clapGain.connect(c.destination);
-    claps.start(t); claps.stop(t + dur);
+  // ─── عناصر HTMLAudio للأصوات الواقعية (lazy-loaded) ───
+  const audioFiles = {
+    applause:      { url: './sounds/applause.mp3',      el: null, startAt: 1.0, duration: 6.0, vol: 0.85 },
+    disappointment:{ url: './sounds/disappointment.ogg',el: null, startAt: 8.0, duration: 5.0, vol: 0.90 }
+  };
+  function preloadAudio(key) {
+    const spec = audioFiles[key];
+    if (!spec || spec.el) return spec && spec.el;
+    const a = new Audio(spec.url);
+    a.preload = 'auto';
+    a.volume = spec.vol;
+    spec.el = a;
+    return a;
+  }
+  function playAudioFile(key) {
+    const spec = audioFiles[key];
+    if (!spec) return;
+    const a = preloadAudio(key);
+    try {
+      a.pause();
+      a.currentTime = spec.startAt || 0;
+      a.volume = spec.vol;
+      // إيقاف تلقائي بعد المدة
+      const stopAt = (spec.startAt || 0) + (spec.duration || 999);
+      const onTime = () => {
+        if (a.currentTime >= stopAt) {
+          a.pause();
+          a.removeEventListener('timeupdate', onTime);
+        }
+      };
+      a.addEventListener('timeupdate', onTime);
+      const p = a.play();
+      if (p && p.catch) p.catch(()=>{});
+    } catch(e) {}
   }
 
-  // 😔 تأوّهات حسرة بشرية (خسارة)
+  // 👏 تصفيق فعلي (فوز أو تعادل)
+  function playCheer(c) {
+    playAudioFile('applause');
+  }
+
+  // 😔 تأوّهات وحسرة جماهير فعلية (خسارة)
   function playSigh(c) {
-    const t = c.currentTime;
-    const dur = 2.4;
-
-    // ضوضاء بشري بفلتر صوتي (يشبه vowel "آه")
-    function ooh(start, len, peakGain) {
-      const n = c.createBufferSource();
-      n.buffer = getNoiseBuffer(c);
-      // فلتران متتاليان يعطيان إحساس صوت بشري (فورمانتات حرف الألف)
-      const f1 = c.createBiquadFilter();
-      f1.type = 'bandpass'; f1.Q.value = 8; f1.frequency.value = 700;
-      const f2 = c.createBiquadFilter();
-      f2.type = 'bandpass'; f2.Q.value = 10; f2.frequency.value = 1100;
-      const g = c.createGain();
-      g.gain.setValueAtTime(0.0001, start);
-      g.gain.exponentialRampToValueAtTime(peakGain, start + 0.3);
-      g.gain.setValueAtTime(peakGain, start + len * 0.5);
-      // انحدار بطيء (إحساس تنهد)
-      f1.frequency.linearRampToValueAtTime(450, start + len);
-      f2.frequency.linearRampToValueAtTime(750, start + len);
-      g.gain.exponentialRampToValueAtTime(0.0001, start + len);
-      n.connect(f1); f1.connect(f2); f2.connect(g); g.connect(c.destination);
-      n.start(start); n.stop(start + len + 0.05);
-    }
-
-    // تأوّه جماعي رئيسي (طويل)
-    ooh(t, 2.0, 0.45);
-    // تأوّه ثانوي متأخر (طبقة ثانية تعطي عمق)
-    ooh(t + 0.3, 1.8, 0.25);
+    playAudioFile('disappointment');
   }
 
   // ⚖️ تعادل — صفّارة الحكم + جمهور محايد
