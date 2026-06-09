@@ -3,6 +3,12 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
+const dns = require('dns');
+
+// تجاوز ـ DNS المحلي (127.0.0.1 فاشل في SRV) → استخدم Cloudflare/Google
+try {
+  dns.setServers(['1.1.1.1', '8.8.8.8', '1.0.0.1', '8.8.4.4']);
+} catch (e) { /* ignore */ }
 
 const app = express();
 const httpServer = createServer(app);

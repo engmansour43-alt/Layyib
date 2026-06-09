@@ -613,12 +613,25 @@ function setupSocketListeners() {
       renderWaitingPlayers(room.players);
   });
   socket.on('game_started', (room) => {
-    if (!league.isHost) { league.qs = room.questions; league.diff = room.difficulty; }
+    // دائماً خذ أسئلة السيرفر (للمضيف واللاعبين) لتجنب أي تعارض
+    if (room && Array.isArray(room.questions) && room.questions.length >= TOTAL) {
+      league.qs = room.questions;
+      league.diff = room.difficulty || league.diff;
+    }
     startLeagueGame();
   });
   socket.on('question_changed', ({ qIdx }) => {
     if (league.cur !== qIdx) {
-      clearInterval(league.timer); league.cur = qIdx; loadLeagueQuestion(qIdx);
+      // لو المستخدم لم يجاوب بعد، سجل إجابة خاطئة تلقائية للسؤال السابق (منع تعلّق بسبب الخصم السريع)
+      if (!league.answered && league.currentQ) {
+        console.warn('[auto-answer] qIdx changed before user answered. Auto-marking as wrong.');
+        league.answered = true;
+        league.streak = 0;
+        if (typeof updateDot === 'function') updateDot(league.currentQIdx, false);
+      }
+      if (league.timer) { clearInterval(league.timer); league.timer = null; }
+      league.cur = qIdx;
+      loadLeagueQuestion(qIdx);
     }
   });
   socket.on('players_updated', (players) => { league.players = players; renderLivePlayers(); });
@@ -743,9 +756,9 @@ function buildQuestions(diff, cat) {
 // ═══════════════════════════════════════════
 function startSolo() {
   SFX.play('start');
-  // تحميل أصوات النهاية في الخلفية لتجنب تأخير البدء
-  try { new Audio('./sounds/applause.mp3').preload='auto'; } catch(e){}
-  try { new Audio('./sounds/disappointment.ogg').preload='auto'; } catch(e){}
+  // تحميل + فكّ تشفير أصوات النهاية مسبقاً (Web Audio buffers)
+  SFX.preload('applause');
+  SFX.preload('disappointment');
   solo.qs = buildQuestions(solo.diff, solo.cat);
   solo.cur=0; solo.score=0; solo.correct=0; solo.streak=0; solo.best=0; solo.results=[];
   league.mode = false;
@@ -1051,9 +1064,19 @@ function leaveRoomAndGoHome() {
 // ═══════════════════════════════════════════
 function startLeagueGame() {
   cleanListeners();
+  // تصفير كامل لحالة الجولة السابقة (مهم لإعادة اللعب / إعادة الجولة)
+  if (league.timer) { clearInterval(league.timer); league.timer = null; }
   league.mode = true;
+  league.cur = 0;          // ← كان السبب في الفريز: يبقى 9 من الجولة السابقة
+  league.currentQ = null;  // إعادة تصفير السؤال المجمّد المعروض
+  league.currentQIdx = -1;
   league.score = 0; league.correct = 0; league.streak = 0; league.best = 0;
   league.answered = false;
+  league.timeLeft = 0;
+
+  // إلغاء أي تأثيرات بصرية عالقة من الجولة السابقة
+  try { $('reveal').classList.remove('show'); } catch(e) {}
+  try { $('streak-msg').textContent = ''; } catch(e) {}
 
   $('live-bar').style.display = 'block';
   showScreen('screen-quiz');
@@ -1077,6 +1100,9 @@ function loadLeagueQuestion(qIdx) {
     }
     return;
   }
+  // تثبيت السؤال الحالي (snapshot) لضمان تطابق العرض والتقييم
+  league.currentQ = q;
+  league.currentQIdx = qIdx;
   const maxTime = TIME[league.diff];
   league.timeLeft = maxTime;
 
@@ -1112,7 +1138,12 @@ function leagueTimeUp(qIdx) {
   league.answered = true; league.streak = 0;
   flashScreen('bad');
   $('streak-msg').textContent = '⏰ انتهى الوقت!';
-  const q = league.qs[qIdx];
+  // استخدم السؤال المجمّد المعروض
+  const q = league.currentQ || league.qs[qIdx];
+  if (!q || !Array.isArray(q.opts)) {
+    if (league.isHost) advanceLeagueQuestion(qIdx);
+    return;
+  }
   renderOptions(q, -1, true);
   $('reveal-ans').textContent = q.opts[q.ans];
   $('reveal').classList.add('show');
@@ -1124,13 +1155,59 @@ function leagueTimeUp(qIdx) {
   // Server handles auto-advance once all online players answered.
 }
 
+function leagueAnswerWith(q, qIdx, idx) {
+  // مسار إصلاح: استخدم سؤال محدد بدل الاجتهاد
+  league.currentQ = q; league.currentQIdx = qIdx;
+  league.answered = true;
+  const ok = idx === q.ans;
+  if (ok) {
+    const bonus = Math.ceil(league.timeLeft/TIME[league.diff]*50);
+    league.score += PTS[league.diff]+bonus;
+    league.correct++; league.streak++; league.best=Math.max(league.best,league.streak);
+    flashScreen('ok'); SFX.play('correct');
+  } else {
+    league.streak=0; flashScreen('bad'); SFX.play('wrong');
+  }
+  renderOptions(q, idx, true);
+  if (!ok) { $('reveal-ans').textContent=q.opts[q.ans]; $('reveal').classList.add('show'); }
+  updateDot(qIdx, ok);
+  $('score-disp').textContent = league.score;
+  if (socket && socket.connected) {
+    socket.emit('answer', { code: league.roomCode, qIdx, optIdx: idx, ok, score: league.score, correct: league.correct });
+  }
+}
+
 function leagueAnswer(idx) {
   if (league.answered) return;
   clearInterval(league.timer);
-  league.answered = true;
 
-  const qIdx = league.cur;
-  const q = league.qs[qIdx];
+  // استخدم السؤال المجمّد المعروض فعلياً
+  const q = league.currentQ;
+  const qIdx = (league.currentQIdx !== undefined) ? league.currentQIdx : league.cur;
+  if (!q || !Array.isArray(q.opts) || typeof q.ans !== 'number') {
+    console.error('[leagueAnswer] invalid question at', qIdx, q);
+    showToast('❌ خلل في السؤال - تم التخطّي');
+    if (league.isHost && socket && socket.connected) {
+      socket.emit('advance_question', { code: league.roomCode, qIdx });
+    }
+    return;
+  }
+  // فحص تعارض: هل النص في الـ DOM يطابق q.text؟
+  const domText = $('q-text').textContent;
+  const domCat = $('q-cat').textContent;
+  if (domText !== q.text) {
+    console.error('[MISMATCH] DOM text:', domText, '| q.text:', q.text);
+    console.error('[MISMATCH] DOM cat:', domCat, '| q.cat:', q.cat, '(' + (CATL[q.cat]||q.cat) + ')');
+    console.error('[MISMATCH] league.cur=', league.cur, 'currentQIdx=', league.currentQIdx, 'qs.len=', league.qs.length);
+    // إصلاح فوري: اعثر على السؤال الفعلي المعروض في الـ DOM
+    const realQ = league.qs.find(x => x && x.text === domText);
+    if (realQ) {
+      console.warn('[MISMATCH] using real DOM question instead. Real ans=', realQ.ans, 'opt=', realQ.opts[realQ.ans]);
+      // استبدل السؤال الفعلي المعروض ثم أكمل
+      return leagueAnswerWith(realQ, league.qs.indexOf(realQ), idx);
+    }
+  }
+  league.answered = true;
   const ok = idx === q.ans;
 
   if (ok) {
@@ -1291,8 +1368,21 @@ $('btn-leave-room').onclick = leaveRoomAndGoHome;
 // League results — غادر الغرفة السابقة قبل الرجوع للقائمة
 $('btn-league-again').onclick = () => {
   if (socket && league.roomCode) socket.emit('leave_room', { code: league.roomCode });
-  clearInterval(league.timer);
-  league.roomCode = null; league.isHost = false; league.mode = false;
+  if (league.timer) { clearInterval(league.timer); league.timer = null; }
+  // تصفير كامل لمنع تسرّب حالة للجولة الجديدة
+  league.roomCode = null;
+  league.isHost = false;
+  league.mode = false;
+  league.qs = [];
+  league.cur = 0;
+  league.currentQ = null;
+  league.currentQIdx = -1;
+  league.score = 0;
+  league.correct = 0;
+  league.streak = 0;
+  league.best = 0;
+  league.answered = false;
+  league.players = {};
   showScreen('screen-league-menu');
 };
 
@@ -1494,8 +1584,16 @@ if (_inviteCode) {
 const SFX = (() => {
   let ctx = null;
   function getCtx() {
+    const isNew = !ctx;
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === 'suspended') ctx.resume();
+    // أول مرة ننشئ context → فك تشفير أي بايتات محفوظة
+    if (isNew) {
+      Object.keys(audioFiles || {}).forEach(k => {
+        const spec = audioFiles[k];
+        if (spec && spec.ab && !spec.buf) ensureDecoded(spec);
+      });
+    }
     return ctx;
   }
 
@@ -1511,7 +1609,7 @@ const SFX = (() => {
         case 'cheer':   playCheer(c);   break;
         case 'sigh':    playSigh(c);    break;
         case 'draw':    playDraw(c);    break;
-        case 'preload': /* warm audio files */ break;
+        case 'preload': preloadAudio(opts && opts.key); break;
       }
     } catch(e) {}
   }
@@ -1574,39 +1672,71 @@ const SFX = (() => {
     return buf;
   }
 
-  // ─── عناصر HTMLAudio للأصوات الواقعية (lazy-loaded) ───
+  // ─── أصوات واقعية عبر Web Audio API (decoded buffers لتشغيل فوري) ───
   const audioFiles = {
-    applause:      { url: './sounds/applause.mp3',      el: null, startAt: 1.0, duration: 6.0, vol: 0.85 },
-    disappointment:{ url: './sounds/disappointment.ogg',el: null, startAt: 8.0, duration: 5.0, vol: 0.90 }
+    applause:      { url: './sounds/applause.mp3',      buf: null, loading: null, startAt: 0.0, duration: 6.0, vol: 0.85 },
+    disappointment:{ url: './sounds/disappointment.ogg',buf: null, loading: null, startAt: 0.0, duration: 5.0, vol: 0.90 }
   };
+  // تحميل + فكّ تشفير الملف مرة واحدة (يُستدعى عند بدء اللعبة)
+  // تحميل مبكر: fetch فقط (بدون AudioContext) ثم decode لاحقاً عند توفر context
   function preloadAudio(key) {
     const spec = audioFiles[key];
-    if (!spec || spec.el) return spec && spec.el;
-    const a = new Audio(spec.url);
-    a.preload = 'auto';
-    a.volume = spec.vol;
-    spec.el = a;
-    return a;
+    if (!spec) return null;
+    if (spec.buf) return Promise.resolve(spec.buf);
+    if (spec.loading) return spec.loading;
+    spec.loading = fetch(spec.url)
+      .then(r => r.arrayBuffer())
+      .then(ab => {
+        spec.ab = ab; // احفظ البايتات لحين توفر context
+        if (ctx) {
+          return new Promise((res, rej) => ctx.decodeAudioData(ab.slice(0), res, rej))
+            .then(buf => { spec.buf = buf; return buf; });
+        }
+        return null;
+      })
+      .catch(() => { spec.loading = null; return null; });
+    return spec.loading;
+  }
+  // لو البايتات جاهزة والـ buf ما تفكّ بعد، فكّها الآن
+  function ensureDecoded(spec) {
+    if (spec.buf || !spec.ab) return Promise.resolve(spec.buf);
+    const c = getCtx();
+    return new Promise((res, rej) => c.decodeAudioData(spec.ab.slice(0), res, rej))
+      .then(buf => { spec.buf = buf; return buf; })
+      .catch(() => null);
   }
   function playAudioFile(key) {
     const spec = audioFiles[key];
     if (!spec) return;
-    const a = preloadAudio(key);
+    const c = getCtx();
+    const start = () => {
+      if (!spec.buf) return false;
+      try {
+        const src = c.createBufferSource();
+        src.buffer = spec.buf;
+        const g = c.createGain();
+        g.gain.value = spec.vol;
+        src.connect(g); g.connect(c.destination);
+        src.start(0, spec.startAt || 0, spec.duration || undefined);
+        return true;
+      } catch(e) { return false; }
+    };
+    // 1) لو الـ buffer جاهز → تشغيل فوري
+    if (spec.buf) { start(); return; }
+    // 2) لو البايتات جاهزة وبس ما انفكّت → فكّها الآن (سريع، دون تحميل شبكة) ثم شغل
+    if (spec.ab) {
+      ensureDecoded(spec).then(() => { start(); });
+      return;
+    }
+    // 3) فالباك: HTMLAudio فوري + بدء تحميل للمرة الجاية
+    preloadAudio(key);
     try {
-      a.pause();
-      a.currentTime = spec.startAt || 0;
+      const a = new Audio(spec.url);
       a.volume = spec.vol;
-      // إيقاف تلقائي بعد المدة
-      const stopAt = (spec.startAt || 0) + (spec.duration || 999);
-      const onTime = () => {
-        if (a.currentTime >= stopAt) {
-          a.pause();
-          a.removeEventListener('timeupdate', onTime);
-        }
-      };
-      a.addEventListener('timeupdate', onTime);
+      a.currentTime = spec.startAt || 0;
       const p = a.play();
       if (p && p.catch) p.catch(()=>{});
+      setTimeout(() => { try { a.pause(); } catch(e){} }, (spec.duration || 5) * 1000);
     } catch(e) {}
   }
 
@@ -1686,7 +1816,13 @@ const SFX = (() => {
     tone(c, 523, t + 1.75, 0.4, 'sine', 0.18); // نفس النغمة (تعادل)
   }
 
-  return { play };
+  // تحميل مسبق لأصوات النتيجة عند بدء التطبيق (يفك الترميز مرة وحدة)
+  // ملاحظة: AudioContext غالباً suspended حتى أول تفاعل، لكن fetch+decode يشتغل بدونه على أغلب المتصفحات.
+  function preload(key) { return preloadAudio(key); }
+  // حمّل الكل فوراً بشكل صامت
+  try { preloadAudio('applause'); preloadAudio('disappointment'); } catch(e) {}
+
+  return { play, preload };
 })();
 
 </script>
