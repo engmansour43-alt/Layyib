@@ -436,12 +436,37 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 </div>
 
 <!-- ══════════ MATCHMAKING SEARCH ══════════ -->
+<style>
+  /* عدّاد دائري تنازلي داخل دائرة تتلوّن */
+  @property --mm-prog { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+  .mm-countdown {
+    width:160px; height:160px; margin:0 auto 20px;
+    border-radius:50%;
+    border:5px solid transparent;
+    background:
+      linear-gradient(#13213d, #13213d) padding-box,
+      conic-gradient(#ffd700 0deg, #ff8c00 var(--mm-prog, 360deg), #1e3a5f var(--mm-prog, 360deg)) border-box;
+    display:flex; align-items:center; justify-content:center;
+    font-size:64px; font-weight:bold;
+    color:#ffd700;
+    text-shadow: 0 0 16px rgba(255,215,0,0.6);
+    box-shadow: 0 0 30px rgba(255,215,0,0.25);
+    animation: mmRingRotate 4s linear infinite;
+  }
+  @keyframes mmRingRotate {
+    0%   { --mm-prog: 360deg; }
+    100% { --mm-prog: 0deg; }
+  }
+  @keyframes mmPulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.05); }
+  }
+</style>
 <div class="screen" id="screen-matchmaking">
   <div style="text-align:center;padding:40px 20px">
-    <div style="font-size:64px;margin-bottom:20px;animation:fi 0.5s ease">🎯</div>
+    <div class="mm-countdown" id="mm-countdown">5</div>
     <div style="font-size:22px;font-weight:700;margin-bottom:8px">جارٍ البحث عن خصم...</div>
     <div id="mm-status" style="color:var(--muted);margin-bottom:24px;font-size:14px">اتصال بالخادم...</div>
-    <div class="loader-spinner" style="width:60px;height:60px;border:5px solid #1a2740;border-top-color:var(--blue);border-radius:50%;margin:0 auto 24px;animation:spin 1s linear infinite"></div>
     <div id="mm-elapsed" style="font-size:18px;font-weight:700;color:var(--blue);margin-bottom:24px">00:00</div>
     <div id="mm-relax-hint" style="font-size:12px;color:var(--muted);margin-bottom:24px;display:none">توسيع البحث لأي خصم متاح...</div>
     <button class="btn btn-danger" id="btn-cancel-match" style="width:100%;max-width:300px;margin:0 auto">إلغاء البحث</button>
@@ -979,15 +1004,44 @@ function joinRoom() {
 // MATCHMAKING
 // ─────────────────────────────────────────
 let mmTimer = null;
+let mmCdTimer = null;
 let mmStartedAt = 0;
+let mmAudio = null;
+function stopMatchSound() {
+  if (mmAudio) {
+    try { mmAudio.pause(); mmAudio.currentTime = 0; } catch(e){}
+    mmAudio = null;
+  }
+}
+function startMatchSound() {
+  stopMatchSound();
+  try {
+    mmAudio = new Audio('./sounds/matchmaking-drone.wav');
+    mmAudio.loop = true;
+    mmAudio.volume = 0.45;
+    const p = mmAudio.play();
+    if (p && p.catch) p.catch(() => { /* autoplay blocked — تجاهل بصمت */ });
+  } catch(e) { mmAudio = null; }
+}
 function stopMatchTimer() {
   if (mmTimer) { clearInterval(mmTimer); mmTimer = null; }
+  if (mmCdTimer) { clearInterval(mmCdTimer); mmCdTimer = null; }
+  stopMatchSound();
 }
 function startMatchTimer() {
   mmStartedAt = Date.now();
   $('mm-elapsed').textContent = '00:00';
   $('mm-relax-hint').style.display = 'none';
   stopMatchTimer();
+  // ⏱ عدّاد تنازلي دائري 5→1 ويعيد
+  let cd = 5;
+  const cdEl = $('mm-countdown');
+  if (cdEl) cdEl.textContent = cd;
+  mmCdTimer = setInterval(() => {
+    cd--; if (cd <= 0) cd = 5;
+    if (cdEl) cdEl.textContent = cd;
+  }, 800);
+  // ⏰ عدّاد الوقت المنقضي
   mmTimer = setInterval(() => {
     const sec = Math.floor((Date.now() - mmStartedAt) / 1000);
     const m = String(Math.floor(sec/60)).padStart(2,'0');
@@ -995,6 +1049,8 @@ function startMatchTimer() {
     $('mm-elapsed').textContent = `${m}:${s}`;
     if (sec >= 15) $('mm-relax-hint').style.display = 'block';
   }, 500);
+  // 🔊 صوت الترقّب (loop)
+  startMatchSound();
 }
 
 function findMatch() {

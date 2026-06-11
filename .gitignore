@@ -11,3 +11,13 @@ build-review.js
 review.html
 logos-preview.html
 render-icons.js
+
+# عينات/سكريبتات توليد الأصوات والأيقونات (للتطوير فقط)
+sounds/samples/
+tts-samples.js
+elevenlabs-samples.js
+matchmaking-sounds.js
+suspense-sounds.js
+capture-radar-gifs.js
+radar-preview.html
+snap-matchmaking.js
