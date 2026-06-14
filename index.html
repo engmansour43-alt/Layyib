@@ -401,7 +401,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
   </div>
   <div class="card">
     <div class="section-label">💾 سجّل نتيجتك</div>
-    <input class="name-input" id="r-name" type="text" placeholder="أدخل اسمك..." maxlength="20" />
+    <input id="r-name" type="hidden" />
     <button class="btn btn-gold" id="btn-save-solo">حفظ في لوحة المتصدرين</button>
   </div>
   <button class="btn btn-primary" id="btn-retry" style="justify-content:center">🔄 العب مجدداً</button>
@@ -414,10 +414,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
     <button class="back-btn" onclick="showScreen('screen-home')">‹</button>
     <div class="back-title">دوري الأصدقاء</div>
   </div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="section-label">اسمك في اللعبة</div>
-    <input class="name-input" id="league-name" type="text" placeholder="أدخل اسمك..." maxlength="20" style="margin-bottom:0" />
-  </div>
+  <input id="league-name" type="hidden" />
   <div class="room-section" style="background:linear-gradient(135deg,#0a2540,#0f1a2e);border:2px solid var(--blue)">
     <div class="room-section-title">🎯 البحث عن خصم</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px;text-align:center">الصعوبة والفئة تؤخذ من الإعدادات أسفل</div>
@@ -1494,6 +1491,17 @@ function getCurrentUser() {
 }
 function setCurrentUser(user) {
   localStorage.setItem('layyib_current_user', JSON.stringify(user));
+  fillPlayerNameFields();
+}
+
+// تعبئة حقول الاسم المخفية (r-name + league-name) بـusername الحالي
+function fillPlayerNameFields() {
+  const u = JSON.parse(localStorage.getItem('layyib_current_user') || 'null');
+  if (!u || !u.username) return;
+  const r = document.getElementById('r-name');
+  const l = document.getElementById('league-name');
+  if (r) r.value = u.username;
+  if (l) l.value = u.username;
 }
 
 function switchAuthTab(tab) {
@@ -1630,6 +1638,7 @@ function enterHome() {
   if (user) {
     $('home-username').textContent = user.username;
     $('home-avatar').textContent = user.avatar;
+    fillPlayerNameFields();
   }
   showScreen('screen-home');
 }
