@@ -4,6 +4,9 @@ const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
 const dns = require('dns');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 // تجاوز ـ DNS المحلي (127.0.0.1 فاشل في SRV) → استخدم Cloudflare/Google
 try {
@@ -11,19 +14,43 @@ try {
 } catch (e) { /* ignore */ }
 
 const app = express();
+// Render يضع proxy أمام التطبيق — لازم نخبر Express عشان rate-limit يقرأ IP الحقيقي
+app.set('trust proxy', 1);
+
+// CORS: نقبل origin محددة فقط في الإنتاج، وكل شيء في dev
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://layyib.onrender.com,http://localhost:3000')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: (origin, cb) => {
+      // اسمح بطلبات بدون origin (mobile apps, curl, file://)
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      cb(new Error('Origin غير مسموح'));
+    },
+    methods: ['GET', 'POST']
+  }
 });
 
-app.use(express.json());
+// helmet: security headers (CSP معطّل لأن inline scripts/styles موجودة في index.html)
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+app.use(express.json({ limit: '256kb' }));
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ═══════════════════════════════════════════
 // MONGODB CONNECTION
 // ═══════════════════════════════════════════
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://Mansour:92845844Mm@cluster0.2o9o2de.mongodb.net/layyib?appName=Cluster0';
+const MONGO_URI = process.env.MONGO_URI;
+if (!MONGO_URI) {
+  console.error('❌ MONGO_URI غير مضبوط في environment variables');
+  process.exit(1);
+}
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB متصل'))
@@ -32,48 +59,89 @@ mongoose.connect(MONGO_URI)
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   displayName: { type: String, required: true },
-  password: { type: String, required: true },
+  password: { type: String, required: true },          // bcrypt hash
+  passwordPlain: { type: Boolean, default: false },     // true = الباسوورد لسا plain (للحسابات القديمة قبل bcrypt)
   avatar: { type: String, default: '⚽' },
   createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', userSchema);
+const BCRYPT_ROUNDS = 10;
+
+// ═══════════════════════════════════════════
+// RATE LIMITERS
+// ═══════════════════════════════════════════
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 دقيقة
+  max: 10,                    // 10 محاولات لكل IP
+  message: { ok: false, error: 'محاولات كثيرة، انتظر 15 دقيقة' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 // ═══════════════════════════════════════════
 // USER ACCOUNTS API
 // ═══════════════════════════════════════════
 
 // Register
-app.post('/api/register', async (req, res) => {
-  const { username, password, avatar } = req.body;
+app.post('/api/register', authLimiter, async (req, res) => {
+  const { username, password, avatar } = req.body || {};
   if (!username || !password) return res.json({ ok: false, error: 'بيانات ناقصة' });
-  if (username.length < 3) return res.json({ ok: false, error: 'الاسم قصير جداً (3 أحرف على الأقل)' });
+  if (typeof username !== 'string' || typeof password !== 'string') return res.json({ ok: false, error: 'بيانات غير صحيحة' });
+  if (username.length < 3 || username.length > 30) return res.json({ ok: false, error: 'الاسم يجب أن يكون بين 3 و30 حرفاً' });
   if (/\s/.test(username)) return res.json({ ok: false, error: 'لا تضع مسافات في الاسم' });
-  if (password.length < 4) return res.json({ ok: false, error: 'كلمة المرور قصيرة (4 أحرف على الأقل)' });
+  if (password.length < 4 || password.length > 100) return res.json({ ok: false, error: 'كلمة المرور قصيرة (4 أحرف على الأقل)' });
 
   try {
     const existing = await User.findOne({ username: username.toLowerCase() });
     if (existing) return res.json({ ok: false, error: 'اسم المستخدم مأخوذ، جرّب اسماً آخر' });
 
-    await User.create({ username: username.toLowerCase(), displayName: username, password, avatar: avatar || '⚽' });
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    await User.create({
+      username: username.toLowerCase(),
+      displayName: username,
+      password: hash,
+      passwordPlain: false,
+      avatar: avatar || '⚽'
+    });
     res.json({ ok: true, user: { username, avatar: avatar || '⚽' } });
   } catch (e) {
+    console.error('register error:', e.message);
     res.json({ ok: false, error: 'خطأ في السيرفر' });
   }
 });
 
-// Login
-app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
+// Login (مع migration تلقائي للحسابات القديمة من plain-text إلى bcrypt)
+app.post('/api/login', authLimiter, async (req, res) => {
+  const { username, password } = req.body || {};
   if (!username || !password) return res.json({ ok: false, error: 'أدخل اسم المستخدم وكلمة المرور' });
+  if (typeof username !== 'string' || typeof password !== 'string') return res.json({ ok: false, error: 'بيانات غير صحيحة' });
 
   try {
     const user = await User.findOne({ username: username.toLowerCase() });
     if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
-    if (user.password !== password) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
+
+    // كشف bcrypt بالـsignature: hashes تبدأ بـ$2a$, $2b$, أو $2y$
+    const isBcryptHash = typeof user.password === 'string' && /^\$2[aby]\$/.test(user.password);
+
+    let ok = false;
+    if (isBcryptHash) {
+      ok = await bcrypt.compare(password, user.password);
+    } else {
+      // حساب قديم: قارن plain، وإذا صح حوّل لـbcrypt مرة وحدة
+      ok = (user.password === password);
+      if (ok) {
+        user.password = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        user.passwordPlain = false;
+        await user.save();
+        console.log(`🔐 migration: ${user.username} → bcrypt`);
+      }
+    }
+    if (!ok) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
 
     res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar } });
   } catch (e) {
+    console.error('login error:', e.message);
     res.json({ ok: false, error: 'خطأ في السيرفر' });
   }
 });
