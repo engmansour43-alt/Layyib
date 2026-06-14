@@ -567,7 +567,19 @@ const league = {
 // SOCKET.IO
 // ═══════════════════════════════════════════
 let socket = null;
-const DEFAULT_SERVER_URL = 'https://layyib.onrender.com';
+// استخدم نفس origin الصفحة تلقائياً (يشتغل مع أي domain: layyib.com, layyib.onrender.com, localhost)
+const DEFAULT_SERVER_URL = (typeof window !== 'undefined' && window.location && window.location.origin)
+  ? window.location.origin
+  : 'https://layyib.com';
+
+// تنظيف: لو localStorage فيه URL قديم (مثل layyib.onrender.com)، امسحه واستخدم origin الحالي
+try {
+  const savedUrl = localStorage.getItem('layyib_server');
+  if (savedUrl && savedUrl !== DEFAULT_SERVER_URL) {
+    console.log('[server] تنظيف URL قديم:', savedUrl, '→', DEFAULT_SERVER_URL);
+    localStorage.removeItem('layyib_server');
+  }
+} catch (e) { /* ignore */ }
 
 function connectToServer(url, onSuccess, onFail) {
   if (socket) { socket.disconnect(); socket = null; }
