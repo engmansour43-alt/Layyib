@@ -58,18 +58,54 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB متصل'))
   .catch(err => console.error('❌ خطأ في MongoDB:', err.message));
 
+// حقل displayName ملغي — يبقى في السجلات القديمة بدون تعارض (strict:false)، لكن ما نعتمده للعرض جديداً
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  displayName: { type: String, required: true },
-  password: { type: String, required: true },          // bcrypt hash
-  passwordPlain: { type: Boolean, default: false },     // true = الباسوورد لسا plain (للحسابات القديمة قبل bcrypt)
-  email: { type: String, lowercase: true, trim: true, sparse: true, index: true }, // optional للقدامى، يُستخدم للاستعادة
+  username: { type: String, required: true, unique: true },              // الاسم بـcase الأصلي (يُعرض في اللعبة)
+  usernameLower: { type: String, required: true, unique: true, index: true }, // lowercase لـlogin + uniqueness case-insensitive
+  password: { type: String, required: true },
+  passwordPlain: { type: Boolean, default: false },
+  email: { type: String, lowercase: true, trim: true, sparse: true, index: true },
   avatar: { type: String, default: '⚽' },
   createdAt: { type: Date, default: Date.now }
-});
+}, { strict: false });
 
 const User = mongoose.model('User', userSchema);
 const BCRYPT_ROUNDS = 10;
+
+// ═══════════════════════════════════════════
+// MIGRATION: إلغاء displayName + إضافة usernameLower للسجلات القديمة
+// تحويل username للـdisplayName الأصلي (لو موجود) لتجميل العرض
+// ═══════════════════════════════════════════
+async function runUserMigration() {
+  try {
+    const users = await User.find({ $or: [{ usernameLower: { $exists: false } }, { usernameLower: null }] }).lean();
+    if (users.length === 0) return;
+
+    console.log(`🔄 migration: معالجة ${users.length} حساب قديم`);
+    for (const u of users) {
+      const displayName = u.displayName;
+      const newUsername = (displayName && typeof displayName === 'string' && displayName.length >= 3 && !/\s/.test(displayName))
+        ? displayName
+        : u.username;
+      const usernameLower = (newUsername || '').toLowerCase();
+      try {
+        await User.updateOne(
+          { _id: u._id },
+          { $set: { username: newUsername, usernameLower } }
+        );
+      } catch (innerErr) {
+        console.error(`migration error لـ ${u.username}:`, innerErr.message);
+      }
+    }
+    console.log('✅ username migration انتهت');
+  } catch (e) {
+    console.error('migration error:', e.message);
+  }
+}
+
+mongoose.connection.once('open', () => {
+  runUserMigration();
+});
 
 // Password Reset Tokens - TTL index يحذف المنتهية تلقائياً
 const passwordResetSchema = new mongoose.Schema({
@@ -182,8 +218,12 @@ app.post('/api/register', authLimiter, async (req, res) => {
     cleanEmail = email.trim().toLowerCase();
   }
 
+  const trimmedUsername = username.trim();
+  const usernameLower = trimmedUsername.toLowerCase();
+
   try {
-    const existing = await User.findOne({ username: username.toLowerCase() });
+    // case-insensitive: نتحقّق من usernameLower أو السجلات القديمة اللي username عندها lowercase
+    const existing = await User.findOne({ $or: [{ usernameLower }, { username: usernameLower }] });
     if (existing) return res.json({ ok: false, error: 'اسم المستخدم مأخوذ، جرّب اسماً آخر' });
     if (cleanEmail) {
       const emailExists = await User.findOne({ email: cleanEmail });
@@ -192,15 +232,15 @@ app.post('/api/register', authLimiter, async (req, res) => {
 
     const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const doc = {
-      username: username.toLowerCase(),
-      displayName: username,
+      username: trimmedUsername,    // بـcase الأصلي
+      usernameLower,                // للـlookup
       password: hash,
       passwordPlain: false,
       avatar: avatar || '⚽'
     };
     if (cleanEmail) doc.email = cleanEmail;
     await User.create(doc);
-    res.json({ ok: true, user: { username, avatar: avatar || '⚽', email: cleanEmail } });
+    res.json({ ok: true, user: { username: trimmedUsername, avatar: avatar || '⚽', email: cleanEmail } });
   } catch (e) {
     console.error('register error:', e.message);
     res.json({ ok: false, error: 'خطأ في السيرفر' });
@@ -214,10 +254,12 @@ app.post('/api/login', authLimiter, async (req, res) => {
   if (typeof username !== 'string' || typeof password !== 'string') return res.json({ ok: false, error: 'بيانات غير صحيحة' });
 
   try {
-    const user = await User.findOne({ username: username.toLowerCase() });
+    const usernameLower = username.trim().toLowerCase();
+    // case-insensitive: نفتّش بـusernameLower (الجديد) أو username (القديم، lowercase للسجلات قبل migration)
+    const user = await User.findOne({ $or: [{ usernameLower }, { username: usernameLower }] });
     if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
 
-    // كشف bcrypt بالـsignature: hashes تبدأ بـ$2a$, $2b$, أو $2y$
+    // كشف bcrypt بالـsignature
     const isBcryptHash = typeof user.password === 'string' && /^\$2[aby]\$/.test(user.password);
 
     let ok = false;
@@ -235,7 +277,7 @@ app.post('/api/login', authLimiter, async (req, res) => {
     }
     if (!ok) return res.json({ ok: false, error: 'كلمة المرور غير صحيحة' });
 
-    res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar, email: user.email || null } });
+    res.json({ ok: true, user: { username: user.username, avatar: user.avatar, email: user.email || null } });
   } catch (e) {
     console.error('login error:', e.message);
     res.json({ ok: false, error: 'خطأ في السيرفر' });
@@ -257,7 +299,8 @@ app.post('/api/update-email', authLimiter, async (req, res) => {
   if (!validateEmail(cleanEmail)) return res.json({ ok: false, error: 'الإيميل غير صحيح' });
 
   try {
-    const user = await User.findOne({ username: username.toLowerCase() });
+    const usernameLower = username.trim().toLowerCase();
+    const user = await User.findOne({ $or: [{ usernameLower }, { username: usernameLower }] });
     if (!user) return res.json({ ok: false, error: 'اسم المستخدم غير موجود' });
 
     // تحقّق من الباسوورد الحالي
@@ -300,6 +343,7 @@ app.post('/api/forgot-password', resetLimiter, async (req, res) => {
     const id = identifier.trim().toLowerCase();
     const user = await User.findOne({
       $or: [
+        { usernameLower: id },
         { username: id },
         { email: id }
       ]
@@ -326,7 +370,7 @@ app.post('/api/forgot-password', resetLimiter, async (req, res) => {
 
     const resetUrl = `${APP_URL}/reset.html?token=${rawToken}`;
     try {
-      await sendPasswordResetEmail(user.email, user.displayName, resetUrl);
+      await sendPasswordResetEmail(user.email, user.username, resetUrl);
       console.log(`📧 reset email أُرسل إلى ${user.username}`);
     } catch (emailErr) {
       console.error('reset email error:', emailErr.message);
@@ -369,7 +413,7 @@ app.post('/api/reset-password', resetLimiter, async (req, res) => {
     await PasswordReset.deleteMany({ userId: user._id, used: false });
 
     console.log(`🔑 password reset لـ ${user.username}`);
-    res.json({ ok: true, user: { username: user.displayName, avatar: user.avatar } });
+    res.json({ ok: true, user: { username: user.username, avatar: user.avatar } });
   } catch (e) {
     console.error('reset-password error:', e.message);
     res.json({ ok: false, error: 'خطأ في السيرفر' });
