@@ -107,7 +107,7 @@ async function sendPasswordResetEmail(toEmail, displayName, resetUrl) {
   const html = `
   <div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#f7f7f7;border-radius:12px;color:#222">
     <div style="text-align:center;margin-bottom:24px">
-      <h1 style="color:#0d7a3a;margin:0">⚽ لعييب</h1>
+      <h1 style="color:#0d7a3a;margin:0">🔥 لعييب</h1>
     </div>
     <div style="background:white;padding:24px;border-radius:8px">
       <h2 style="margin-top:0">السلام عليكم ${displayName} 👋</h2>
