@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>إعادة تعيين كلمة المرور - لقيب</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Tahoma,Arial,sans-serif;background:linear-gradient(135deg,#0a3d1f,#0d7a3a);min-height:100vh;display:flex;align-items:center;justify-content:center;color:#fff;padding:20px}
+    .card{background:rgba(0,0,0,.4);backdrop-filter:blur(10px);border-radius:16px;padding:32px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1)}
+    h1{text-align:center;font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#00e664,#0d7a3a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .subtitle{text-align:center;color:#aaa;font-size:14px;margin-bottom:24px}
+    .field{width:100%;padding:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-size:15px;margin-bottom:12px;text-align:right;direction:rtl}
+    .field:focus{outline:none;border-color:#00e664;background:rgba(255,255,255,.12)}
+    .btn{width:100%;padding:14px;background:linear-gradient(135deg,#00e664,#0d7a3a);color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;margin-top:8px;transition:transform .1s}
+    .btn:hover{transform:translateY(-1px)}
+    .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .msg{padding:12px;border-radius:8px;margin:12px 0;font-size:14px;text-align:center}
+    .err{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+    .ok{background:rgba(34,197,94,.15);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+    .info{background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.3)}
+    .link{text-align:center;margin-top:16px}
+    .link a{color:#00e664;text-decoration:none;font-size:14px}
+    .link a:hover{text-decoration:underline}
+    .loading{text-align:center;padding:24px;color:#aaa}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚽ لقيب</h1>
+    <p class="subtitle">إعادة تعيين كلمة المرور</p>
+
+    <div id="loading" class="loading">⏳ جارٍ التحقق من الرابط...</div>
+
+    <div id="invalid" style="display:none">
+      <div class="msg err">❌ الرابط غير صالح أو منتهي الصلاحية.</div>
+      <div class="link"><a href="/">العودة للموقع الرئيسي</a></div>
+    </div>
+
+    <div id="form" style="display:none">
+      <input class="field" id="pass1" type="password" placeholder="كلمة المرور الجديدة" maxlength="100" />
+      <input class="field" id="pass2" type="password" placeholder="تأكيد كلمة المرور" maxlength="100" />
+      <div id="err" class="msg err" style="display:none"></div>
+      <button class="btn" id="submitBtn" onclick="doReset()">🔐 حفظ كلمة المرور الجديدة</button>
+    </div>
+
+    <div id="success" style="display:none">
+      <div class="msg ok">✅ تم تغيير كلمة المرور بنجاح!</div>
+      <div class="link"><a href="/">▶ ادخل للموقع الآن</a></div>
+    </div>
+  </div>
+
+  <script>
+    function getToken() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('token') || '';
+    }
+
+    async function verifyToken() {
+      const token = getToken();
+      if (!token) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('invalid').style.display = 'block';
+        return;
+      }
+      try {
+        const res = await fetch('/api/reset-password/verify?token=' + encodeURIComponent(token));
+        const data = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        if (data.ok) {
+          document.getElementById('form').style.display = 'block';
+        } else {
+          document.getElementById('invalid').style.display = 'block';
+        }
+      } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('invalid').style.display = 'block';
+      }
+    }
+
+    async function doReset() {
+      const pass1 = document.getElementById('pass1').value;
+      const pass2 = document.getElementById('pass2').value;
+      const errEl = document.getElementById('err');
+      const btn = document.getElementById('submitBtn');
+      errEl.style.display = 'none';
+
+      if (!pass1 || !pass2) {
+        errEl.textContent = '⚠️ أدخل كلمة المرور والتأكيد';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (pass1.length < 4) {
+        errEl.textContent = '⚠️ كلمة المرور قصيرة (4 أحرف على الأقل)';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (pass1 !== pass2) {
+        errEl.textContent = '❌ كلمتا المرور غير متطابقتين';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '⏳ جارٍ الحفظ...';
+
+      try {
+        const res = await fetch('/api/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: getToken(), newPassword: pass1 })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          document.getElementById('form').style.display = 'none';
+          document.getElementById('success').style.display = 'block';
+        } else {
+          errEl.textContent = '❌ ' + (data.error || 'خطأ غير معروف');
+          errEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = '🔐 حفظ كلمة المرور الجديدة';
+        }
+      } catch (e) {
+        errEl.textContent = '❌ تعذر الاتصال بالسيرفر';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = '🔐 حفظ كلمة المرور الجديدة';
+      }
+    }
+
+    verifyToken();
+  </script>
+</body>
+</html>

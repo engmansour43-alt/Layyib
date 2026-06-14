@@ -260,6 +260,21 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
       <input class="auth-field" id="login-pass" type="password" placeholder="كلمة المرور" maxlength="30" />
       <div class="auth-error" id="login-error"></div>
       <button class="btn btn-primary" style="justify-content:center" onclick="doLogin()">دخول ▶</button>
+      <div style="text-align:center;margin-top:12px">
+        <a href="#" onclick="showForgotForm();return false" style="color:#888;font-size:13px;text-decoration:underline">نسيت كلمة المرور؟</a>
+      </div>
+    </div>
+
+    <!-- Forgot Password -->
+    <div id="auth-forgot-form" style="display:none">
+      <p style="color:#aaa;font-size:13px;text-align:center;margin-bottom:12px">أدخل اسم المستخدم أو الإيميل، وراح نرسل لك رابط استعادة.</p>
+      <input class="auth-field" id="forgot-id" type="text" placeholder="اسم المستخدم أو الإيميل" maxlength="60" />
+      <div class="auth-error" id="forgot-error"></div>
+      <div class="auth-error" id="forgot-success" style="color:#0a0"></div>
+      <button class="btn btn-primary" style="justify-content:center" onclick="doForgotPassword()">إرسال رابط الاستعادة 📧</button>
+      <div style="text-align:center;margin-top:12px">
+        <a href="#" onclick="showLoginForm();return false" style="color:#888;font-size:13px;text-decoration:underline">← رجوع لـدخول</a>
+      </div>
     </div>
 
     <!-- Register -->
@@ -276,6 +291,7 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
         <div class="auth-avatar" data-av="👑" onclick="selectAvatar(this)">👑</div>
       </div>
       <input class="auth-field" id="reg-user" type="text" placeholder="اسم المستخدم (بدون مسافات)" maxlength="20" />
+      <input class="auth-field" id="reg-email" type="email" placeholder="الإيميل (لاستعادة كلمة المرور)" maxlength="100" />
       <input class="auth-field" id="reg-pass" type="password" placeholder="كلمة المرور" maxlength="30" />
       <input class="auth-field" id="reg-pass2" type="password" placeholder="تأكيد كلمة المرور" maxlength="30" />
       <div class="auth-error" id="reg-error"></div>
@@ -1486,8 +1502,54 @@ function switchAuthTab(tab) {
   $('tab-register').classList.toggle('active', !isLogin);
   $('auth-login-form').style.display = isLogin ? 'block' : 'none';
   $('auth-register-form').style.display = isLogin ? 'none' : 'block';
+  const forgotEl = $('auth-forgot-form');
+  if (forgotEl) forgotEl.style.display = 'none';
   $('login-error').textContent = '';
   $('reg-error').textContent = '';
+}
+
+function showForgotForm() {
+  $('auth-login-form').style.display = 'none';
+  $('auth-register-form').style.display = 'none';
+  $('auth-forgot-form').style.display = 'block';
+  $('forgot-error').textContent = '';
+  $('forgot-success').textContent = '';
+  $('forgot-id').value = '';
+}
+
+function showLoginForm() {
+  $('auth-forgot-form').style.display = 'none';
+  $('auth-register-form').style.display = 'none';
+  $('auth-login-form').style.display = 'block';
+  $('tab-login').classList.add('active');
+  $('tab-register').classList.remove('active');
+  $('login-error').textContent = '';
+}
+
+async function doForgotPassword() {
+  const identifier = $('forgot-id').value.trim();
+  const errEl = $('forgot-error');
+  const okEl = $('forgot-success');
+  errEl.textContent = '';
+  okEl.textContent = '';
+
+  if (!identifier) { errEl.textContent = '⚠️ أدخل اسم المستخدم أو الإيميل'; return; }
+
+  try {
+    const res = await fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      okEl.textContent = '✅ ' + (data.message || 'تفقّد بريدك');
+    } else {
+      errEl.textContent = '❌ ' + (data.error || 'خطأ غير معروف');
+    }
+  } catch (e) {
+    errEl.textContent = '❌ تعذر الاتصال بالسيرفر';
+  }
 }
 
 function selectAvatar(el) {
@@ -1523,6 +1585,8 @@ async function doLogin() {
 
 async function doRegister() {
   const username = $('reg-user').value.trim();
+  const emailField = $('reg-email');
+  const email = emailField ? emailField.value.trim() : '';
   const pass1 = $('reg-pass').value;
   const pass2 = $('reg-pass2').value;
   const errEl = $('reg-error');
@@ -1531,17 +1595,18 @@ async function doRegister() {
   if (!username) { errEl.textContent = '⚠️ أدخل اسم المستخدم'; return; }
   if (username.length < 3) { errEl.textContent = '⚠️ الاسم قصير جداً (3 أحرف على الأقل)'; return; }
   if (/\s/.test(username)) { errEl.textContent = '⚠️ لا تضع مسافات في الاسم'; return; }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = '⚠️ الإيميل غير صحيح (أو اتركه فارغاً)'; return; }
   if (!pass1) { errEl.textContent = '⚠️ أدخل كلمة المرور'; return; }
   if (pass1.length < 4) { errEl.textContent = '⚠️ كلمة المرور قصيرة (4 أحرف على الأقل)'; return; }
   if (pass1 !== pass2) { errEl.textContent = '❌ كلمتا المرور غير متطابقتين'; return; }
 
   try {
-    const serverUrl = localStorage.getItem('layyib_server') || '';
-    const base = serverUrl || '';
-    const res = await fetch(base + '/api/register', {
+    const body = { username, password: pass1, avatar: selectedAvatar };
+    if (email) body.email = email;
+    const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password: pass1, avatar: selectedAvatar })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (!data.ok) { errEl.textContent = '❌ ' + data.error; return; }
